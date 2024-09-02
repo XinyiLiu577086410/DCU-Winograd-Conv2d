@@ -1,10 +1,10 @@
 #include <stdio.h>
 #include <math.h>
-#include "hip/hip_runtime.h"
+#include <hip/hip_runtime.h>
 #include <hip/hip_ext.h>
 #include "verfiy.h"
 #include "conv2d.h"
-
+extern "C" void winconv_4x3(const void* param_ptr) ;
 
 int main(int argc, char**argv)
 {
@@ -88,10 +88,9 @@ int main(int argc, char**argv)
         
     /*******************************warm up and get result************************************/
     // hipExtLaunchKernel(kernelInfo.kernelPtr,groups,threads,(void**)&param,ldsSize,0,0,0,0);
-    winograd_4x3();
+    winconv_4x3(&param);
 
     hipMemcpy(pOut_host, pOut_device,  n*k*outh*outw*sizeof(_Float16), hipMemcpyDeviceToHost); 
-
 
     /*******************************cost time test************************************/
     hipEvent_t start,stop;
@@ -104,6 +103,7 @@ int main(int argc, char**argv)
     for(int i=0; i<iternum; i++)
     {
         // hipExtLaunchKernel(kernelInfo.kernelPtr,groups,threads,(void**)&param,ldsSize,0,0,0,0); 
+        winconv_4x3(&param);
     }
     hipEventRecord(stop,0);
 

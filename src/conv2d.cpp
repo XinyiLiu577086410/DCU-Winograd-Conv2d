@@ -1,8 +1,8 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_ext.h>
-#include <sys/_types/_size_t.h>
 #include "conv2d.h"
 #include "common.h"
+#include <rocblas.h>
 
 /*选手自定义的kernel入参结构体*/
 typedef struct mykernelParamType
@@ -11,15 +11,15 @@ typedef struct mykernelParamType
     _Float16*   pweight;                        //权值数据地址
     _Float16*   pout;                           //输出数据地址
     // 额外申请的空间
-    _Float16*   image_d; 
-    _Float16*   filter_d;
+    // _Float16*   image_d; 
+    // _Float16*   filter_d;
     _Float16*   packedImage_d;
     _Float16*   packedFilter_d;
     _Float16*   U_d;
     _Float16*   V_d;
     _Float16*   M_d;
     _Float16*   Y_d;
-    _Float16*   out_d;
+    // _Float16*   out_d;
     unsigned int      n;                              //batch szie            
     unsigned int      c;                              //channel number        
     unsigned int      h;                              //数据高                
@@ -98,49 +98,410 @@ typedef struct mykernelParamType
     
 // }
 
-extern "C" float winconv_2x3(void** param_ptr) __attribute__((amdgpu_flat_work_group_size(1,256))) {
-    mykernelParamType* param = (mykernelParamType*)param_ptr;
-    
-    filterOcIcPack<<<dim3(10, 10), dim3(16, 16)>>>(filter_d, fs, packedFilter_d);
-    HANDLER_ERROR_MSG("kernel panic!!!");
+__global__ void srcTransform(_Float16* __restrict__ packedImage, _Float16* __restrict__ V, VShape vs, int simdDimSize) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  _Float16 z0, z1, z2, z3, z4, z5, z6;
+  while (idx < simdDimSize) {
+    for (int w = 0; w < TILE_IN_W; ++w) {
+      z6 = packedImage[0 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
 
-    ImageTileIcPack<<<dim3(10, 10), dim3(16, 16)>>>(image_d, is, packedImage_d, ts);
-    HANDLER_ERROR_MSG("kernel panic!!!");
+      z0 = 4.0f * z6;
+
+      z6 = packedImage[1 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+      z1 = -4.0f * z6;
+      z2 =  4.0f * z6;
+      z3 = -2.0f * z6;
+      z4 =  2.0f * z6;
+      z5 =  4.0f * z6;
+
+      z6 = packedImage[2 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+      z0 += -5.0f * z6;
+      z1 += -4.0f * z6;
+      z2 += -4.0f * z6;
+      z3 += -z6;
+      z4 += -z6;
+
+      z6 = packedImage[3 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+      z1 +=  z6;
+      z2 += -z6;
+      z3 +=  2.0f * z6;
+      z4 += -2.0f * z6;
+      z5 += -5.0f * z6;
+
+      z6 = packedImage[4 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+      z0 += z6;
+      z1 += z6;
+      z2 += z6;
+      z3 += z6;
+      z4 += z6;
+
+      z6 = packedImage[5 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+      z5 += z6;
+
+      V[0 * TILE_IN_W * simdDimSize + w * simdDimSize + idx] = z0;
+      V[1 * TILE_IN_W * simdDimSize + w * simdDimSize + idx] = z1;
+      V[2 * TILE_IN_W * simdDimSize + w * simdDimSize + idx] = z2;
+      V[3 * TILE_IN_W * simdDimSize + w * simdDimSize + idx] = z3;
+      V[4 * TILE_IN_W * simdDimSize + w * simdDimSize + idx] = z4;
+      V[5 * TILE_IN_W * simdDimSize + w * simdDimSize + idx] = z5;
+    }
+
+    for (int h = 0; h < TILE_IN_H; ++h) {
+      z6 = V[h * TILE_IN_W * simdDimSize + 0 * simdDimSize + idx];
+
+      z0 = 4.0f * z6;
+
+      z6 = V[h * TILE_IN_W * simdDimSize + 1 * simdDimSize + idx];
+
+      z1 = -4.0f * z6;
+      z2 =  4.0f * z6;
+      z3 = -2.0f * z6;
+      z4 =  2.0f * z6;
+      z5 =  4.0f * z6;
+
+      z6 = V[h * TILE_IN_W * simdDimSize + 2 * simdDimSize + idx];
+
+      z0 += -5.0f * z6;
+      z1 += -4.0f * z6;
+      z2 += -4.0f * z6;
+      z3 += -z6;
+      z4 += -z6;
+
+      z6 = V[h * TILE_IN_W * simdDimSize + 3 * simdDimSize + idx];
+
+      z1 +=  z6;
+      z2 += -z6;
+      z3 +=  2.0f * z6;
+      z4 += -2.0f * z6;
+      z5 += -5.0f * z6;
+
+      z6 = V[h * TILE_IN_W * simdDimSize + 4 * simdDimSize + idx];
+
+      z0 += z6;
+      z1 += z6;
+      z2 += z6;
+      z3 += z6;
+      z4 += z6;
+
+      z6 = V[h * TILE_IN_W * simdDimSize + 5 * simdDimSize + idx];
+
+      z5 += z6;
+
+      V[h * TILE_IN_W * simdDimSize + 0 * simdDimSize + idx] = z0;
+      V[h * TILE_IN_W * simdDimSize + 1 * simdDimSize + idx] = z1;
+      V[h * TILE_IN_W * simdDimSize + 2 * simdDimSize + idx] = z2;
+      V[h * TILE_IN_W * simdDimSize + 3 * simdDimSize + idx] = z3;
+      V[h * TILE_IN_W * simdDimSize + 4 * simdDimSize + idx] = z4;
+      V[h * TILE_IN_W * simdDimSize + 5 * simdDimSize + idx] = z5;
+    }
+    idx += blockDim.x * gridDim.x;
+  }
+}
+
+__global__ void filterTransform(_Float16* __restrict__ packedFilter, _Float16* __restrict__ U, UShape us, int simdDimSize) {
+
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+  _Float16 z0, z1, z2, z3, z4, z5, z6;
+  while (idx < simdDimSize) {
+    for (int i = 0; i < FLT_HW; ++i) {
+      z6 = packedFilter[0 * FLT_W * simdDimSize + i * simdDimSize + idx];
+
+      z0 = (1.0f / 4.0f)  * z6;
+      z1 = (-1.0f / 6.0f) * z6;
+      z2 = (-1.0f / 6.0f) * z6;
+      z3 = (1.0f / 24.0f) * z6;
+      z4 = (1.0f / 24.0f) * z6;
+
+      z6 = packedFilter[1 * FLT_W * simdDimSize + i * simdDimSize + idx];
+
+      z1 += (-1.0f / 6.0f)  * z6;
+      z2 += ( 1.0f / 6.0f)  * z6;
+      z3 += (1.0f  / 12.0f) * z6;
+      z4 += (-1.0f / 12.0f) * z6;
+
+      z6 = packedFilter[2 * FLT_W * simdDimSize + i * simdDimSize + idx];
+
+      z1 += (-1.0f / 6.0f) * z6;
+      z2 += (-1.0f / 6.0f) * z6;
+      z3 += ( 1.0f / 6.0f) * z6;
+      z4 += ( 1.0f / 6.0f) * z6;
+      z5 = z6;
+
+      U[0 * TILE_IN_W * simdDimSize + i * simdDimSize + idx] = z0;
+      U[1 * TILE_IN_W * simdDimSize + i * simdDimSize + idx] = z1;
+      U[2 * TILE_IN_W * simdDimSize + i * simdDimSize + idx] = z2;
+      U[3 * TILE_IN_W * simdDimSize + i * simdDimSize + idx] = z3;
+      U[4 * TILE_IN_W * simdDimSize + i * simdDimSize + idx] = z4;
+      U[5 * TILE_IN_W * simdDimSize + i * simdDimSize + idx] = z5;
+    }
+
+    for (int i = 0; i < TILE_IN_H; ++i) {
+      z6 = U[i * TILE_IN_W * simdDimSize + 0 * simdDimSize + idx];
+
+      z0 = (1.0f / 4.0f)  * z6;
+      z1 = (-1.0f / 6.0f) * z6;
+      z2 = (-1.0f / 6.0f) * z6;
+      z3 = (1.0f / 24.0f) * z6;
+      z4 = (1.0f / 24.0f) * z6;
+
+      z6 = U[i * TILE_IN_W * simdDimSize + 1 * simdDimSize + idx];
+
+      z1 += (-1.0f / 6.0f)  * z6;
+      z2 += ( 1.0f / 6.0f)  * z6;
+      z3 += (1.0f  / 12.0f) * z6;
+      z4 += (-1.0f / 12.0f) * z6;
+
+      z6 = U[i * TILE_IN_W * simdDimSize + 2 * simdDimSize + idx];
+
+      z1 += (-1.0f / 6.0f) * z6;
+      z2 += (-1.0f / 6.0f) * z6;
+      z3 += ( 1.0f / 6.0f) * z6;
+      z4 += ( 1.0f / 6.0f) * z6;
+      z5 = z6;
+
+      U[i * TILE_IN_W * simdDimSize + 0 * simdDimSize + idx] = z0;
+      U[i * TILE_IN_W * simdDimSize + 1 * simdDimSize + idx] = z1;
+      U[i * TILE_IN_W * simdDimSize + 2 * simdDimSize + idx] = z2;
+      U[i * TILE_IN_W * simdDimSize + 3 * simdDimSize + idx] = z3;
+      U[i * TILE_IN_W * simdDimSize + 4 * simdDimSize + idx] = z4;
+      U[i * TILE_IN_W * simdDimSize + 5 * simdDimSize + idx] = z5;
+    }
+    idx += blockDim.x * gridDim.x;
+  }
+}
+
+__global__ void destTransform(_Float16* __restrict__ M, _Float16* __restrict__ Y, int simdDimSize) {
+
+  int idx = blockIdx.x * blockDim.x + threadIdx.x; 
+
+  _Float16 z0, z1, z2, z3, z4;
+  while (idx < simdDimSize) {
+    for (int w = 0; w < TILE_IN_W; ++w) {
+      z4 = M[0 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+      z0 = z4;
+
+      z4 = M[1 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+      z0 = z0 + z4;
+      z1 = z4;
+      z2 = z4;
+      z3 = z4;
+      
+      z4 = M[2 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+      z0 += z4;
+      z1 += -z4;
+      z2 += z4;
+      z3 += -z4;
+
+      z4 = M[3 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+      z0 += z4;
+      z1 += 2.0f * z4;
+      z2 += 4.0f * z4;
+      z3 += 8.0f * z4;
+
+      z4 = M[4 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+      z0 += z4;
+      z1 += -2.0f * z4;
+      z2 += 4.0f * z4;
+      z3 += -8.0f * z4;
+
+      z4 = M[5 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+      z3 += z4;
+
+      Y[0 * TILE_IN_W * simdDimSize + w * simdDimSize + idx] = z0;
+      Y[1 * TILE_IN_W * simdDimSize + w * simdDimSize + idx] = z1;
+      Y[2 * TILE_IN_W * simdDimSize + w * simdDimSize + idx] = z2;
+      Y[3 * TILE_IN_W * simdDimSize + w * simdDimSize + idx] = z3;
+    }
+
+    for (int h = 0; h < TILE_OUT_HW; ++h) {
+      z4 = Y[h * TILE_IN_W * simdDimSize + 0 * simdDimSize + idx];
+
+      z0 = z4;
+
+      // z4 = svld1(pg, &YTensor[h][1][idx]);
+      // z4 = YTensor[h][1][idx];
+      z4 = Y[h * TILE_IN_W * simdDimSize + 1 * simdDimSize + idx];
+
+      z0 += z4;
+      z1 = z4;
+      z2 = z4;
+      z3 = z4;
+      
+      // z4 = svld1(pg, &YTensor[h][2][idx]);
+      // z4 = YTensor[h][2][idx];
+      z4 = Y[h * TILE_IN_W * simdDimSize + 2 * simdDimSize + idx];
+      
+      z0 += z4;
+      z1 += -z4;
+      z2 += z4;
+      z3 += -z4;
+
+      // z4 = svld1(pg, &YTensor[h][3][idx]);
+      // z4 = YTensor[h][3][idx];
+      z4 = Y[h * TILE_IN_W * simdDimSize + 3 * simdDimSize + idx];
+
+      z0 += z4;
+      z1 += 2.0f * z4;
+      z2 += 4.0f * z4;
+      z3 += 8.0f * z4;
+
+      // z4 = svld1(pg, &YTensor[h][4][idx]);
+      // z4 = YTensor[h][4][idx];
+      z4 = Y[h * TILE_IN_W * simdDimSize + 4 * simdDimSize + idx];
+
+
+      z0 += z4;
+      z1 += -2.0f * z4;
+      z2 += 4.0f * z4;
+      z3 += -8.0f * z4;
+
+      // z4 = svld1(pg, &YTensor[h][5][idx]);
+      // z4 = YTensor[h][5][idx];
+      z4 = Y[h * TILE_IN_W * simdDimSize + 5 * simdDimSize + idx];
+
+      z3 += z4;
+
+      // svst1_f32(pg, &YTensor[h][0][idx], z0);
+      // svst1_f32(pg, &YTensor[h][1][idx], z1);
+      // svst1_f32(pg, &YTensor[h][2][idx], z2);
+      // svst1_f32(pg, &YTensor[h][3][idx], z3);
+      // YTensor[h][0][idx] = z0;
+      // YTensor[h][1][idx] = z1;
+      // YTensor[h][2][idx] = z2;
+      // YTensor[h][3][idx] = z3;
+      Y[h * TILE_IN_W * simdDimSize + 0 * simdDimSize + idx] = z0;
+      Y[h * TILE_IN_W * simdDimSize + 1 * simdDimSize + idx] = z1;
+      Y[h * TILE_IN_W * simdDimSize + 2 * simdDimSize + idx] = z2;
+      Y[h * TILE_IN_W * simdDimSize + 3 * simdDimSize + idx] = z3;
+    }
+    idx += blockDim.x * gridDim.x;
+  }
+}
+
+__global__ void filterOcIcPack(_Float16* __restrict__ filter, FltShape fs, _Float16* __restrict__ packedFilter) {
+  for(int h = 0; h < FLT_HW; ++h)
+    for(int w = 0; w < FLT_HW; ++w)
+      for(int k = blockIdx.x * blockDim.x + threadIdx.x; 
+          k < fs.oc; 
+          k += blockDim.x * gridDim.x) {
+        for(int c = blockIdx.y * blockDim.y + threadIdx.y;
+            c < fs.ic; 
+            c += blockDim.y * gridDim.y){ 
+          packedFilter[h * fs.w * fs.oc * fs.ic + w * fs.oc * fs.ic + k * fs.ic + c] 
+              = filter[k * fs.ic * fs.h * fs.w + c * fs.h * fs.w + h * fs.w + w];
+        }
+      }
+}
+
+__global__ void ImageTileIcPack(_Float16* __restrict__ image, ImgShape is,  _Float16* __restrict__ packedImage,  TileShape ts) {
+  for(int tile = blockIdx.x * blockDim.x + threadIdx.x; 
+      tile < ts.numTileTotal; 
+      tile += blockDim.x * gridDim.x) {
+    for(int ic = blockIdx.y * blockDim.y + threadIdx.y;
+        ic < is.ic;
+        ic += blockDim.y * gridDim.y) {
+      for(int h = 0; h < TILE_IN_H; ++h) {
+        for(int w = 0; w < TILE_IN_W; ++w) {
+          TileIndex ti = getTileIndex(tile, ts);
+          int b = ti.b, x = ti.tw, y = ti.th;
+          if(y * 4 + h < is.h && x * 4 + w < is.w)
+            packedImage[h * TILE_IN_W * ts.numTileTotal * is.ic + w * ts.numTileTotal * is.ic + tile * is.ic + ic] 
+              = image[b * is.ic * is.h * is.w + ic * is.h * is.w + (y * 4 + h) * is.w + (x * 4 + w)];
+          else
+            packedImage[h * TILE_IN_W * ts.numTileTotal * is.ic + w * ts.numTileTotal * is.ic + tile * is.ic + ic] = 0;
+        }
+      }
+    }
+  }
+}
+
+__global__ void destStore(_Float16* __restrict__ Y, _Float16* __restrict__ out, OutShape os,  TileShape ts) {
+  for(int h = 0; h < TILE_OUT_H; ++h)
+    for(int w = 0; w < TILE_OUT_W; ++w)
+      for(int k = blockIdx.x * blockDim.x + threadIdx.x; 
+          k < os.oc; 
+          k += blockDim.x * gridDim.x)
+        for(int b = blockIdx.y * blockDim.y + threadIdx.y;
+            b < ts.numTileTotal; 
+            b += blockDim.y * gridDim.y) {
+          TileIndex ti = getTileIndex(b, ts);
+          int n = ti.b, x = ti.tw, y = ti.th;
+          if(y * 4 + h < os.h && x * 4 + w < os.w) 
+            out[n * os.oc * os.h * os.w + k * os.h * os.w + (y * 4 + h) * os.w + (x * 4 + w)] 
+              = Y[h * TILE_IN_W * os.oc * ts.numTileTotal + w * os.oc * ts.numTileTotal + k * ts.numTileTotal + b];
+        }
+}
+
+
+extern "C" void winconv_4x3(const void* param_ptr) {
+    
+    const mykernelParamType& param = *(mykernelParamType*)param_ptr;
+    _Float16* filter_d = param.pweight;
+    _Float16* image_d  = param.pin;
+    _Float16* out_d    = param.pout;
+    _Float16* packedImage_d = param.packedImage_d;
+    _Float16* packedFilter_d = param.packedFilter_d;
+    _Float16* U_d = param.U_d;
+    _Float16* V_d = param.V_d;
+    _Float16* M_d = param.M_d;
+    _Float16* Y_d = param.Y_d;
+
+    ImgShape  is = {param.n, param.c, param.h, param.w};
+    FltShape  fs = {param.k, param.c, param.r, param.s};
+    OutShape  os = getOutShape(is, fs);
+    TileShape ts = getTileShape(os);
+    UShape    us = getUShape(fs);
+    VShape    vs = getVShape(is, ts);
+
+    filterOcIcPack<<<dim3(10, 10), dim3(16, 16), 0, hipStreamDefault>>>(filter_d, fs, packedFilter_d);
+
+    ImageTileIcPack<<<dim3(10, 10), dim3(16, 16), 0, hipStreamDefault>>>(image_d, is, packedImage_d, ts);
   
-    srcTransform<<<100, 256>>>(packedImage_d, V_d, vs, vs.ic * vs.numTileTotal);
-    HANDLER_ERROR_MSG("kernel panic!!!");
+    srcTransform<<<100, 256, 0, hipStreamDefault>>>(packedImage_d, V_d, vs, vs.ic * vs.numTileTotal);
   
-    filterTransform<<<100, 256>>>(packedFilter_d, U_d, us, us.ic * us.oc);
-    HANDLER_ERROR_MSG("kernel panic!!!");
+    filterTransform<<<100, 256, 0, hipStreamDefault>>>(packedFilter_d, U_d, us, us.ic * us.oc);
   
-    cublasHandle_t handle;
-    cublasCreate(&handle);
-    float alpha = 1.0f, beta = 0.0f;
+    rocblas_handle handle;
+    rocblas_create_handle(&handle);
+    const _Float16 alpha = 1.0, beta = 0.0;
+    rocblas_operation transa = rocblas_operation_transpose, transb = rocblas_operation_none;
     for(int i = 0; i < TILE_IN_H * TILE_IN_W; ++i) {
-        typedef float (*UTensor_t) [TILE_IN_W][     us.oc     ][us.ic];
-        typedef float (*VTensor_t) [TILE_IN_W][vs.numTileTotal][vs.ic];
-        typedef float (*MTensor_t) [TILE_IN_W][us.oc][vs.numTileTotal];
+        typedef const _Float16 (*UTensor_t) [TILE_IN_W][     us.oc     ][us.ic];
+        typedef _Float16 (*VTensor_t) [TILE_IN_W][vs.numTileTotal][vs.ic];
+        typedef _Float16 (*MTensor_t) [TILE_IN_W][us.oc][vs.numTileTotal];
         UTensor_t UTensor = (UTensor_t) U_d;
         VTensor_t VTensor = (VTensor_t) V_d;
         MTensor_t MTensor = (MTensor_t) M_d;
-        cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N,
+        rocblas_hgemm(handle, transa, transb,
                     vs.numTileTotal, us.oc, us.ic,
                     &alpha,
-                    (float*)(VTensor[i/TILE_IN_W][i%TILE_IN_W]),
+                    (const rocblas_half*)(VTensor[i/TILE_IN_W][i%TILE_IN_W]),
                     vs.ic, 
-                    (float*)(UTensor[i/TILE_IN_W][i%TILE_IN_W]),
+                    (const rocblas_half*)(UTensor[i/TILE_IN_W][i%TILE_IN_W]),
                     us.ic, 
                     &beta, 
-                    (float*)(MTensor[i/TILE_IN_W][i%TILE_IN_W]),
+                    (rocblas_half*)(MTensor[i/TILE_IN_W][i%TILE_IN_W]),
                     vs.numTileTotal);
     }
-    cublasDestroy(handle);
+    rocblas_destroy_handle(handle);
 
-    destTransform<<<100, 256>>>(M_d, Y_d, us.oc * vs.numTileTotal);
-    HANDLER_ERROR_MSG("kernel panic!!!");
+    destTransform<<<100, 256, 0, hipStreamDefault>>>(M_d, Y_d, us.oc * vs.numTileTotal);
+    // HANDLER_ERROR_MSG("kernel panic!!!");
 
-    destStore<<<dim3(10, 10), dim3(16, 16)>>>(Y_d, out_d, os, ts);
-    HANDLER_ERROR_MSG("kernel panic!!!");
+    destStore<<<dim3(10, 10), dim3(16, 16), 0, hipStreamDefault>>>(Y_d, out_d, os, ts);
+    // HANDLER_ERROR_MSG("kernel panic!!!");
 }
 
 /*选手需要返回自定义kernel入参结构体的size*/
@@ -178,7 +539,7 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
     kernelInfo->thready  = 16;                   //thready number per block
     kernelInfo->threadz  = 1;                   //threadz number per block
     kernelInfo->dynmicLdsSize = 0;
-    kernelInfo->kernelPtr= (void*)myKernelConv2dGpu;                 //kernel ptr
+    kernelInfo->kernelPtr= (void*)winconv_4x3;                 //kernel ptr
 
     pArgs->pin = problem->in;
     pArgs->pweight = problem->weight;
@@ -213,15 +574,15 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
     size_t Y_size = TILE_OUT_H * TILE_IN_W  * k * vs.numTileTotal;
     size_t out_size = n * k * outh * outw;
     size_t malloc_size = sizeof(_Float16) * (
-        image_size
-        + filter_size
-        + packedFilter_size
+        // image_size
+        // + filter_size
+        packedFilter_size
         + packedImage_size
         + U_size
         + V_size
         + M_size
         + Y_size
-        + out_size
+        // + out_size
         // n * c * h * w
         // + k * c * r * s
         // + FLT_H * FLT_W * k * c
@@ -233,15 +594,15 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
         // + n * k * outh * outw
     );
 
-    hipMalloc(&pArgs->image_d, malloc_size);
-    pArgs->filter_d = pArgs->image_d + image_size;
-    pArgs->packedFilter_d = pArgs->filter_d + filter_size;
+    hipMalloc(&pArgs->packedFilter_d, malloc_size);
+    // pArgs->filter_d = pArgs->image_d + image_size;
+    // pArgs->packedFilter_d = pArgs->filter_d + filter_size;
     pArgs->packedImage_d = pArgs->packedFilter_d + packedFilter_size;
     pArgs->U_d = pArgs->packedImage_d + packedImage_size;
     pArgs->V_d = pArgs->U_d + U_size;
     pArgs->M_d = pArgs->V_d + V_size;
     pArgs->Y_d = pArgs->M_d + M_size;
-    pArgs->out_d = pArgs->Y_d + Y_size;
+    // pArgs->out_d = pArgs->Y_d + Y_size;
 
     // hipMalloc(&image_d, sizeof(_Float16) * n * c * h * w);
     // hipMalloc(&filter_d, sizeof(_Float16) * k * c * r * s);
