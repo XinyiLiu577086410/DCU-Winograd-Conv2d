@@ -2,7 +2,6 @@
 #include <time.h>
 #include <assert.h>
 #include <sys/time.h>
-#include <omp.h>
 #include <stdint.h>
 
 #define PRAGMA(X) _Pragma(#X)

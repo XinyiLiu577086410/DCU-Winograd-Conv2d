@@ -4,8 +4,9 @@
 #include <hip/hip_ext.h>
 #include "verfiy.h"
 #include "conv2d.h"
+#include "error.h"
 extern "C" void winconv_4x3(const void* param_ptr) ;
-
+extern "C" void free_param(const void* param_ptr) ;
 int main(int argc, char**argv)
 {
     int n = atoi(argv[1]);
@@ -30,10 +31,15 @@ int main(int argc, char**argv)
     _Float16 *pOut_host = (_Float16*)malloc(n*k*outh*outw*sizeof(_Float16));
 
     _Float16 *pIn_device,*pWeight_device,*pOut_device;
-    hipMalloc((void**)&pIn_device, n*c*h*w*sizeof(_Float16));
-    hipMalloc((void**)&pWeight_device, k*c*r*s*sizeof(_Float16));
-    hipMalloc((void**)&pOut_device, n*k*outh*outw*sizeof(_Float16));
+    HIP_CHECK(hipMalloc((void**)&pIn_device, n*c*h*w*sizeof(_Float16)));
+    HIP_CHECK(hipMalloc((void**)&pWeight_device, k*c*r*s*sizeof(_Float16)));
+    HIP_CHECK(hipMalloc((void**)&pOut_device, n*k*outh*outw*sizeof(_Float16)));
     
+    // printf("pIn_device size %ld GiB\n", n*c*h*w*sizeof(_Float16) / 1024 / 1024);
+    // printf("pWeight_device size %ld GiB\n", k*c*r*s*sizeof(_Float16) / 1024 / 1024);
+    // printf("pOut_device size %ld GiB\n", n*k*outh*outw*sizeof(_Float16) / 1024 / 1024);
+    // printf("n:%d, c:%d, h:%d, w:%d, k:%d, r:%d, s:%d, u:%d, v:%d, p:%d, q:%d\n", n, c, h, w, k, r, s, u, v, p, q);
+
     for(int i = 0; i < n*c*h*w; i++)
     {
         pIn[i] = (rand()%255)/255.0;
@@ -50,9 +56,9 @@ int main(int argc, char**argv)
         pOut_host[i] = 0.0;
     }
            
-    hipMemcpy(pIn_device, pIn, n*c*h*w*sizeof(_Float16),hipMemcpyHostToDevice);
-    hipMemcpy(pWeight_device,pWeight,k*c*r*s*sizeof(_Float16),hipMemcpyHostToDevice);
-    hipMemcpy(pOut_device,pOut,n*k*outh*outw*sizeof(_Float16),hipMemcpyHostToDevice);
+    HIP_CHECK(hipMemcpy(pIn_device, pIn, n*c*h*w*sizeof(_Float16),hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(pWeight_device,pWeight,k*c*r*s*sizeof(_Float16),hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(pOut_device,pOut,n*k*outh*outw*sizeof(_Float16),hipMemcpyHostToDevice));
    
     /********************step 1*****************************/
 
@@ -90,7 +96,7 @@ int main(int argc, char**argv)
     // hipExtLaunchKernel(kernelInfo.kernelPtr,groups,threads,(void**)&param,ldsSize,0,0,0,0);
     winconv_4x3(&param);
 
-    hipMemcpy(pOut_host, pOut_device,  n*k*outh*outw*sizeof(_Float16), hipMemcpyDeviceToHost); 
+    HIP_CHECK(hipMemcpy(pOut_host, pOut_device,  n*k*outh*outw*sizeof(_Float16), hipMemcpyDeviceToHost));
 
     /*******************************cost time test************************************/
     hipEvent_t start,stop;
@@ -113,7 +119,9 @@ int main(int argc, char**argv)
     printf("time: %f us\n", time_elapsed*1000/iternum);
     hipEventDestroy(start);
     hipEventDestroy(stop);  
-      
+    
+    free_param(param);
+
     free(param);
 
     printf("===================start verfiy===================\n");
@@ -127,14 +135,16 @@ int main(int argc, char**argv)
         {
             printf("error, postion:%d, gpuvalue:%f, cpuvalue:%f\n", i, (float)pOut_host[i], (float)pOut[i]);
             error++;
-            break;
+            // break;
+            if(error>1000)
+                break;
         }        
     }
     printf("================finish,error:%d=========================\n",error);
 
-    hipFree(pIn_device);
-    hipFree(pWeight_device);
-    hipFree(pOut_device);
+    HIP_CHECK(hipFree(pIn_device));
+    HIP_CHECK(hipFree(pWeight_device));
+    HIP_CHECK(hipFree(pOut_device));
     
     free(pIn);
     free(pWeight);

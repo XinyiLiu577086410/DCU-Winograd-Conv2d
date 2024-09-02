@@ -1,26 +1,19 @@
 #ifndef __ERROR_H__
 #define __ERROR_H__
+#include <iostream>
+#include <hip/hip_runtime.h>
+#include <cstdlib>
 
-#include <stdio.h>
-
-#define HANDLER_ERROR_ERR(err) (HandleError(err, __FILE__, __LINE__))
-
-static void HandleError(cudaError_t err, const char* file, int line) {
-    if (err != cudaSuccess) {
-        printf("%s in %s at line %d\n", cudaGetErrorString(err), file, line);
-        exit(EXIT_FAILURE);
+#define HIP_CHECK(condition)                                                                \
+    {                                                                                       \
+        const hipError_t error = condition;                                                 \
+        if(error != hipSuccess)                                                             \
+        {                                                                                   \
+            std::cerr << "An error encountered: \"" << hipGetErrorString(error) << "\" at " \
+                      << __FILE__ << ':' << __LINE__ << std::endl;                          \
+            std::exit(-1);                                                     \
+        }                                                                                   \
     }
-}
 
-#define HANDLER_ERROR_MSG(msg) (cudaError(msg, __FILE__, __LINE__))
-
-void cudaError(const char* msg, const char* file, int line) {
-    cudaError_t err = cudaGetLastError();
-    if (cudaSuccess != err) {
-        fprintf(stderr, "%s: %s in %s at line %d\n", msg,
-                cudaGetErrorString(err), file, line);
-        exit(EXIT_FAILURE);
-    }
-}
 
 #endif

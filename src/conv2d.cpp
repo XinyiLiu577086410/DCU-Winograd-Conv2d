@@ -1,7 +1,9 @@
+#include <cstdio>
 #include <hip/hip_runtime.h>
 #include <hip/hip_ext.h>
 #include "conv2d.h"
 #include "common.h"
+#include "error.h"
 #include <rocblas.h>
 
 /*选手自定义的kernel入参结构体*/
@@ -43,60 +45,6 @@ typedef struct mykernelParamType
     unsigned int      revs7;                          //预留
 }mykernelParamType;                          
 
-/*选手自己实现的kernel*/
-// extern "C" __global__ void myKernelConv2dGpu(mykernelParamType param) __attribute__((amdgpu_flat_work_group_size(1,256)))
-// {
-
-//     int x = blockIdx.x * blockDim.x + threadIdx.x;
-//     int y = blockIdx.y * blockDim.y + threadIdx.y;
-//     int z = blockIdx.z;
-    
-//     if(x >= param.Oh*param.Ow || y >= param.k || z >= param.n)
-//     {
-//         return;
-//     }
-    
-    
-//     //当前线程处理的数据点在oh、ow上的坐标
-//     int posOh = x/param.Ow;
-//     int posOw = x%param.Ow;
-        
-//     int posh_ori = posOh*param.u - param.p;
-//     int posw_ori = posOw*param.v - param.q;
-    
-//     float sum = 0.0;
-
-//     int inOffset = z*param.c*param.h*param.w + posh_ori*param.w + posw_ori;
-//     int weiOffset = y*param.c*param.r*param.s;
-//     int inChannelOffset = param.h*param.w;
-//     int weightChannelOffset = param.r*param.s;
-    
-//     for(int i = 0; i < param.r; i++)
-//     {
-//         for(int j = 0; j < param.s; j++)
-//         {
-//             int posh_real = posh_ori + i;
-//             int posw_real = posw_ori + j;            
-            
-//             if(posh_real>=0 && posw_real>=0 && posw_real<param.w && posh_real<param.h)
-//             {
-//                 int inOffsetTmp = inOffset;
-//                 int weiOffsetTmp = weiOffset;
-//                 for(int channel = 0; channel<param.c; channel++)
-//                 {
-//                     sum += (float)(param.pin[inOffsetTmp + i*param.w + j] * param.pweight[weiOffsetTmp + i*param.s + j]);
-//                     inOffsetTmp += inChannelOffset;
-//                     weiOffsetTmp += weightChannelOffset;
-//                 }               
-//             }
-//         }
-//     }   
-
-//     //计算输出偏移
-//     int outOffset = z*param.k*param.Oh*param.Ow + y*param.Oh*param.Ow + x;
-//     param.pout[outOffset] = (_Float16)sum;
-    
-// }
 
 __global__ void srcTransform(_Float16* __restrict__ packedImage, _Float16* __restrict__ V, VShape vs, int simdDimSize) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -529,6 +477,8 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
     unsigned int p = problem->p;
     unsigned int q = problem->q;
 
+    // printf("n:%d, c:%d, h:%d, w:%d, k:%d, r:%d, s:%d, u:%d, v:%d, p:%d, q:%d\n", n, c, h, w, k, r, s, u, v, p, q);
+
     unsigned int outh = (h - r + 2*p)/u + 1;
     unsigned int outw = (w - s + 2*q)/v + 1;
 
@@ -574,45 +524,34 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
     size_t Y_size = TILE_OUT_H * TILE_IN_W  * k * vs.numTileTotal;
     size_t out_size = n * k * outh * outw;
     size_t malloc_size = sizeof(_Float16) * (
-        // image_size
-        // + filter_size
         packedFilter_size
         + packedImage_size
         + U_size
         + V_size
         + M_size
         + Y_size
-        // + out_size
-        // n * c * h * w
-        // + k * c * r * s
-        // + FLT_H * FLT_W * k * c
-        // + TILE_IN_H * TILE_IN_H * vs.numTileTotal * c
-        // + TILE_IN_H * TILE_IN_W * k * c
-        // + TILE_IN_H * TILE_IN_W * vs.numTileTotal * c
-        // + TILE_IN_H  * TILE_IN_W  * k * vs.numTileTotal
-        // + TILE_OUT_H * TILE_IN_W  * k * vs.numTileTotal
-        // + n * k * outh * outw
     );
+    printf("malloc_size: %lf GiB\n", malloc_size / 1024.0 / 1024 / 1024);
+    printf("image_size: %lf GiB\n",  sizeof(_Float16) * image_size / 1024.0 / 1024 / 1024);
+    printf("filter_size: %lf GiB\n",  sizeof(_Float16) * filter_size / 1024.0 / 1024 / 1024);
+    printf("packedFilter_size: %lf GiB\n",  sizeof(_Float16) * packedFilter_size / 1024.0 / 1024 / 1024);
+    printf("packedImage_size: %lf GiB\n",  sizeof(_Float16) * packedImage_size / 1024.0 / 1024 / 1024);
+    printf("U_size: %lf GiB\n",  sizeof(_Float16) * U_size / 1024.0 / 1024 / 1024);
+    printf("V_size: %lf GiB\n",  sizeof(_Float16) * V_size / 1024.0 / 1024 / 1024);
+    printf("M_size: %lf GiB\n", sizeof(_Float16) * M_size / 1024.0 / 1024 / 1024 );
+    printf("Y_size: %lf GiB\n",  sizeof(_Float16) * Y_size / 1024.0 / 1024 / 1024);
+    printf("out_size: %lf GiB\n",  sizeof(_Float16) * out_size / 1024.0 / 1024 / 1024 );
 
-    hipMalloc(&pArgs->packedFilter_d, malloc_size);
-    // pArgs->filter_d = pArgs->image_d + image_size;
-    // pArgs->packedFilter_d = pArgs->filter_d + filter_size;
+    HIP_CHECK(hipMalloc(&pArgs->packedFilter_d, malloc_size));
     pArgs->packedImage_d = pArgs->packedFilter_d + packedFilter_size;
     pArgs->U_d = pArgs->packedImage_d + packedImage_size;
     pArgs->V_d = pArgs->U_d + U_size;
     pArgs->M_d = pArgs->V_d + V_size;
     pArgs->Y_d = pArgs->M_d + M_size;
-    // pArgs->out_d = pArgs->Y_d + Y_size;
-
-    // hipMalloc(&image_d, sizeof(_Float16) * n * c * h * w);
-    // hipMalloc(&filter_d, sizeof(_Float16) * k * c * r * s);
-    // hipMalloc(&packedFilter_d, sizeof(_Float16) * FLT_H * FLT_W * k * c);
-    // hipMalloc(&packedImage_d , sizeof(_Float16) * TILE_IN_H * TILE_IN_H * vs.numTileTotal * c);
-    // hipMalloc(&U_d, sizeof(_Float16) * TILE_IN_H * TILE_IN_W * k * c);
-    // hipMalloc(&V_d, sizeof(_Float16) * TILE_IN_H * TILE_IN_W * vs.numTileTotal * c); 
-    // hipMalloc(&M_d, sizeof(_Float16) * TILE_IN_H  * TILE_IN_W  * k * vs.numTileTotal);
-    // hipMalloc(&Y_d, sizeof(_Float16) * TILE_OUT_H * TILE_IN_W  * k * vs.numTileTotal);
-    // hipMalloc(&out_d, sizeof(_Float16) * n * k * outh * outw);
-
     return 0;
+}
+
+extern "C" void free_param(const void* param_ptr) {
+    mykernelParamType* pArgs = (mykernelParamType*)param_ptr;
+    hipFree(pArgs->packedFilter_d);
 }
