@@ -87,7 +87,8 @@ int main(int argc, char**argv)
     int ldsSize = kernelInfo.dynmicLdsSize;
         
     /*******************************warm up and get result************************************/
-    hipExtLaunchKernel(kernelInfo.kernelPtr,groups,threads,(void**)&param,ldsSize,0,0,0,0);
+    // hipExtLaunchKernel(kernelInfo.kernelPtr,groups,threads,(void**)&param,ldsSize,0,0,0,0);
+    winograd_4x3();
 
     hipMemcpy(pOut_host, pOut_device,  n*k*outh*outw*sizeof(_Float16), hipMemcpyDeviceToHost); 
 
@@ -102,7 +103,7 @@ int main(int argc, char**argv)
     int iternum = 100;
     for(int i=0; i<iternum; i++)
     {
-        hipExtLaunchKernel(kernelInfo.kernelPtr,groups,threads,(void**)&param,ldsSize,0,0,0,0); 
+        // hipExtLaunchKernel(kernelInfo.kernelPtr,groups,threads,(void**)&param,ldsSize,0,0,0,0); 
     }
     hipEventRecord(stop,0);
 

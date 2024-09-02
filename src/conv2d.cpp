@@ -1,6 +1,8 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_ext.h>
+#include <sys/_types/_size_t.h>
 #include "conv2d.h"
+#include "common.h"
 
 /*选手自定义的kernel入参结构体*/
 typedef struct mykernelParamType
@@ -8,6 +10,16 @@ typedef struct mykernelParamType
     _Float16*   pin;                            //输入数据地址
     _Float16*   pweight;                        //权值数据地址
     _Float16*   pout;                           //输出数据地址
+    // 额外申请的空间
+    _Float16*   image_d; 
+    _Float16*   filter_d;
+    _Float16*   packedImage_d;
+    _Float16*   packedFilter_d;
+    _Float16*   U_d;
+    _Float16*   V_d;
+    _Float16*   M_d;
+    _Float16*   Y_d;
+    _Float16*   out_d;
     unsigned int      n;                              //batch szie            
     unsigned int      c;                              //channel number        
     unsigned int      h;                              //数据高                
@@ -32,60 +44,104 @@ typedef struct mykernelParamType
 }mykernelParamType;                          
 
 /*选手自己实现的kernel*/
-extern "C" __global__ void myKernelConv2dGpu(mykernelParamType param) __attribute__((amdgpu_flat_work_group_size(1,256)))
-{
+// extern "C" __global__ void myKernelConv2dGpu(mykernelParamType param) __attribute__((amdgpu_flat_work_group_size(1,256)))
+// {
 
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    int z = blockIdx.z;
+//     int x = blockIdx.x * blockDim.x + threadIdx.x;
+//     int y = blockIdx.y * blockDim.y + threadIdx.y;
+//     int z = blockIdx.z;
     
-    if(x >= param.Oh*param.Ow || y >= param.k || z >= param.n)
-    {
-        return;
-    }
+//     if(x >= param.Oh*param.Ow || y >= param.k || z >= param.n)
+//     {
+//         return;
+//     }
     
     
-    //当前线程处理的数据点在oh、ow上的坐标
-    int posOh = x/param.Ow;
-    int posOw = x%param.Ow;
+//     //当前线程处理的数据点在oh、ow上的坐标
+//     int posOh = x/param.Ow;
+//     int posOw = x%param.Ow;
         
-    int posh_ori = posOh*param.u - param.p;
-    int posw_ori = posOw*param.v - param.q;
+//     int posh_ori = posOh*param.u - param.p;
+//     int posw_ori = posOw*param.v - param.q;
     
-    float sum = 0.0;
+//     float sum = 0.0;
 
-    int inOffset = z*param.c*param.h*param.w + posh_ori*param.w + posw_ori;
-    int weiOffset = y*param.c*param.r*param.s;
-    int inChannelOffset = param.h*param.w;
-    int weightChannelOffset = param.r*param.s;
+//     int inOffset = z*param.c*param.h*param.w + posh_ori*param.w + posw_ori;
+//     int weiOffset = y*param.c*param.r*param.s;
+//     int inChannelOffset = param.h*param.w;
+//     int weightChannelOffset = param.r*param.s;
     
-    for(int i = 0; i < param.r; i++)
-    {
-        for(int j = 0; j < param.s; j++)
-        {
-            int posh_real = posh_ori + i;
-            int posw_real = posw_ori + j;            
+//     for(int i = 0; i < param.r; i++)
+//     {
+//         for(int j = 0; j < param.s; j++)
+//         {
+//             int posh_real = posh_ori + i;
+//             int posw_real = posw_ori + j;            
             
-            if(posh_real>=0 && posw_real>=0 && posw_real<param.w && posh_real<param.h)
-            {
-                int inOffsetTmp = inOffset;
-                int weiOffsetTmp = weiOffset;
-                for(int channel = 0; channel<param.c; channel++)
-                {
-                    sum += (float)(param.pin[inOffsetTmp + i*param.w + j] * param.pweight[weiOffsetTmp + i*param.s + j]);
-                    inOffsetTmp += inChannelOffset;
-                    weiOffsetTmp += weightChannelOffset;
-                }               
-            }
-        }
-    }   
+//             if(posh_real>=0 && posw_real>=0 && posw_real<param.w && posh_real<param.h)
+//             {
+//                 int inOffsetTmp = inOffset;
+//                 int weiOffsetTmp = weiOffset;
+//                 for(int channel = 0; channel<param.c; channel++)
+//                 {
+//                     sum += (float)(param.pin[inOffsetTmp + i*param.w + j] * param.pweight[weiOffsetTmp + i*param.s + j]);
+//                     inOffsetTmp += inChannelOffset;
+//                     weiOffsetTmp += weightChannelOffset;
+//                 }               
+//             }
+//         }
+//     }   
 
-    //计算输出偏移
-    int outOffset = z*param.k*param.Oh*param.Ow + y*param.Oh*param.Ow + x;
-    param.pout[outOffset] = (_Float16)sum;
+//     //计算输出偏移
+//     int outOffset = z*param.k*param.Oh*param.Ow + y*param.Oh*param.Ow + x;
+//     param.pout[outOffset] = (_Float16)sum;
     
-}
+// }
 
+extern "C" float winconv_2x3(void** param_ptr) __attribute__((amdgpu_flat_work_group_size(1,256))) {
+    mykernelParamType* param = (mykernelParamType*)param_ptr;
+    
+    filterOcIcPack<<<dim3(10, 10), dim3(16, 16)>>>(filter_d, fs, packedFilter_d);
+    HANDLER_ERROR_MSG("kernel panic!!!");
+
+    ImageTileIcPack<<<dim3(10, 10), dim3(16, 16)>>>(image_d, is, packedImage_d, ts);
+    HANDLER_ERROR_MSG("kernel panic!!!");
+  
+    srcTransform<<<100, 256>>>(packedImage_d, V_d, vs, vs.ic * vs.numTileTotal);
+    HANDLER_ERROR_MSG("kernel panic!!!");
+  
+    filterTransform<<<100, 256>>>(packedFilter_d, U_d, us, us.ic * us.oc);
+    HANDLER_ERROR_MSG("kernel panic!!!");
+  
+    cublasHandle_t handle;
+    cublasCreate(&handle);
+    float alpha = 1.0f, beta = 0.0f;
+    for(int i = 0; i < TILE_IN_H * TILE_IN_W; ++i) {
+        typedef float (*UTensor_t) [TILE_IN_W][     us.oc     ][us.ic];
+        typedef float (*VTensor_t) [TILE_IN_W][vs.numTileTotal][vs.ic];
+        typedef float (*MTensor_t) [TILE_IN_W][us.oc][vs.numTileTotal];
+        UTensor_t UTensor = (UTensor_t) U_d;
+        VTensor_t VTensor = (VTensor_t) V_d;
+        MTensor_t MTensor = (MTensor_t) M_d;
+        cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N,
+                    vs.numTileTotal, us.oc, us.ic,
+                    &alpha,
+                    (float*)(VTensor[i/TILE_IN_W][i%TILE_IN_W]),
+                    vs.ic, 
+                    (float*)(UTensor[i/TILE_IN_W][i%TILE_IN_W]),
+                    us.ic, 
+                    &beta, 
+                    (float*)(MTensor[i/TILE_IN_W][i%TILE_IN_W]),
+                    vs.numTileTotal);
+    }
+    cublasDestroy(handle);
+
+    destTransform<<<100, 256>>>(M_d, Y_d, us.oc * vs.numTileTotal);
+    HANDLER_ERROR_MSG("kernel panic!!!");
+
+    destStore<<<dim3(10, 10), dim3(16, 16)>>>(Y_d, out_d, os, ts);
+    HANDLER_ERROR_MSG("kernel panic!!!");
+}
 
 /*选手需要返回自定义kernel入参结构体的size*/
 int getParamsize(__in__ problem_t* problem, __out__ int* paramSize)
@@ -139,7 +195,63 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
     pArgs->p = p;                              //卷积在高方向上的补边     default value 0
     pArgs->q = q;                              //卷积在宽方向上的补边     default value 0
     pArgs->Oh = outh;
-    pArgs->Ow = outw;       
+    pArgs->Ow = outw;
+
+    ImgShape  is = {n, c, h, w};
+    FltShape  fs = {k, c, FLT_H, FLT_W};
+    OutShape  os = {n, k, outh, outw};
+    TileShape ts = getTileShape(os);
+    UShape    us = getUShape(fs);
+    VShape    vs = getVShape(is, ts);
+    size_t image_size = n * c * h * w;
+    size_t filter_size = k * c * r * s;
+    size_t packedFilter_size = FLT_H * FLT_W * k * c;
+    size_t packedImage_size = TILE_IN_H * TILE_IN_H * vs.numTileTotal * c;
+    size_t U_size = TILE_IN_H * TILE_IN_W * k * c;
+    size_t V_size = TILE_IN_H * TILE_IN_W * vs.numTileTotal * c;
+    size_t M_size = TILE_IN_H  * TILE_IN_W  * k * vs.numTileTotal;
+    size_t Y_size = TILE_OUT_H * TILE_IN_W  * k * vs.numTileTotal;
+    size_t out_size = n * k * outh * outw;
+    size_t malloc_size = sizeof(_Float16) * (
+        image_size
+        + filter_size
+        + packedFilter_size
+        + packedImage_size
+        + U_size
+        + V_size
+        + M_size
+        + Y_size
+        + out_size
+        // n * c * h * w
+        // + k * c * r * s
+        // + FLT_H * FLT_W * k * c
+        // + TILE_IN_H * TILE_IN_H * vs.numTileTotal * c
+        // + TILE_IN_H * TILE_IN_W * k * c
+        // + TILE_IN_H * TILE_IN_W * vs.numTileTotal * c
+        // + TILE_IN_H  * TILE_IN_W  * k * vs.numTileTotal
+        // + TILE_OUT_H * TILE_IN_W  * k * vs.numTileTotal
+        // + n * k * outh * outw
+    );
+
+    hipMalloc(&pArgs->image_d, malloc_size);
+    pArgs->filter_d = pArgs->image_d + image_size;
+    pArgs->packedFilter_d = pArgs->filter_d + filter_size;
+    pArgs->packedImage_d = pArgs->packedFilter_d + packedFilter_size;
+    pArgs->U_d = pArgs->packedImage_d + packedImage_size;
+    pArgs->V_d = pArgs->U_d + U_size;
+    pArgs->M_d = pArgs->V_d + V_size;
+    pArgs->Y_d = pArgs->M_d + M_size;
+    pArgs->out_d = pArgs->Y_d + Y_size;
+
+    // hipMalloc(&image_d, sizeof(_Float16) * n * c * h * w);
+    // hipMalloc(&filter_d, sizeof(_Float16) * k * c * r * s);
+    // hipMalloc(&packedFilter_d, sizeof(_Float16) * FLT_H * FLT_W * k * c);
+    // hipMalloc(&packedImage_d , sizeof(_Float16) * TILE_IN_H * TILE_IN_H * vs.numTileTotal * c);
+    // hipMalloc(&U_d, sizeof(_Float16) * TILE_IN_H * TILE_IN_W * k * c);
+    // hipMalloc(&V_d, sizeof(_Float16) * TILE_IN_H * TILE_IN_W * vs.numTileTotal * c); 
+    // hipMalloc(&M_d, sizeof(_Float16) * TILE_IN_H  * TILE_IN_W  * k * vs.numTileTotal);
+    // hipMalloc(&Y_d, sizeof(_Float16) * TILE_OUT_H * TILE_IN_W  * k * vs.numTileTotal);
+    // hipMalloc(&out_d, sizeof(_Float16) * n * k * outh * outw);
 
     return 0;
 }
