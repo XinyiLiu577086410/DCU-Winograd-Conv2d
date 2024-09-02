@@ -1,3 +1,4 @@
+#include <cinttypes>
 #include <cstdio>
 #include <hip/hip_runtime.h>
 #include <hip/hip_ext.h>
@@ -395,32 +396,42 @@ __global__ void destStore(_Float16* __restrict__ Y, _Float16* __restrict__ out, 
 
 extern "C" void winconv_4x3(const void* param_ptr) {
     
-    const mykernelParamType& param = *(mykernelParamType*)param_ptr;
-    _Float16* filter_d = param.pweight;
-    _Float16* image_d  = param.pin;
-    _Float16* out_d    = param.pout;
-    _Float16* packedImage_d = param.packedImage_d;
-    _Float16* packedFilter_d = param.packedFilter_d;
-    _Float16* U_d = param.U_d;
-    _Float16* V_d = param.V_d;
-    _Float16* M_d = param.M_d;
-    _Float16* Y_d = param.Y_d;
+    const mykernelParamType* param = (const mykernelParamType*)param_ptr;
+    _Float16* filter_d = param->pweight;
+    _Float16* image_d  = param->pin;
+    _Float16* out_d    = param->pout;
+    _Float16* packedImage_d = param->packedImage_d;
+    _Float16* packedFilter_d = param->packedFilter_d;
+    _Float16* U_d = param->U_d;
+    _Float16* V_d = param->V_d;
+    _Float16* M_d = param->M_d;
+    _Float16* Y_d = param->Y_d;
+    #ifdef __DBG__
+      printf("filter_d: %p, image_d: %p, out_d: %p, packedImage_d: %p, packedFilter_d: %p, U_d: %p, V_d: %p, M_d: %p, Y_d: %p\n", filter_d, image_d, out_d, packedImage_d, packedFilter_d, U_d, V_d, M_d, Y_d);
+    #endif
 
-    ImgShape  is = {param.n, param.c, param.h, param.w};
-    FltShape  fs = {param.k, param.c, param.r, param.s};
+    ImgShape  is = {param->n, param->c, param->h, param->w};
+    FltShape  fs = {param->k, param->c, param->r, param->s};
     OutShape  os = getOutShape(is, fs);
     TileShape ts = getTileShape(os);
     UShape    us = getUShape(fs);
     VShape    vs = getVShape(is, ts);
 
     filterOcIcPack<<<dim3(10, 10), dim3(16, 16), 0, hipStreamDefault>>>(filter_d, fs, packedFilter_d);
-
+    HIP_CHECK_KERNEL("Kernel panic!!!");    
     ImageTileIcPack<<<dim3(10, 10), dim3(16, 16), 0, hipStreamDefault>>>(image_d, is, packedImage_d, ts);
-  
+    HIP_CHECK_KERNEL("Kernel panic!!!");   
+    #ifdef __DBG__
+      COPY_TO_HOST_AND_PRINT_ARRAY(packedImage_d, 1);
+      // COPY_TO_DEVICE_AND_PRINT_ARRAY(packedImage_d, 10);
+    #endif
     srcTransform<<<100, 256, 0, hipStreamDefault>>>(packedImage_d, V_d, vs, vs.ic * vs.numTileTotal);
-  
+    HIP_CHECK_KERNEL("Kernel panic!!!");    
+    // COPY_TO_DEVICE_AND_PRINT_ARRAY(V_d, 10);
     filterTransform<<<100, 256, 0, hipStreamDefault>>>(packedFilter_d, U_d, us, us.ic * us.oc);
-  
+    HIP_CHECK_KERNEL("Kernel panic!!!");    
+    // COPY_TO_DEVICE_AND_PRINT_ARRAY(U_d, 10);
+
     rocblas_handle handle;
     rocblas_create_handle(&handle);
     const _Float16 alpha = 1.0, beta = 0.0;
@@ -444,12 +455,15 @@ extern "C" void winconv_4x3(const void* param_ptr) {
                     vs.numTileTotal);
     }
     rocblas_destroy_handle(handle);
+    // COPY_TO_DEVICE_AND_PRINT_ARRAY(M_d, 10);
 
     destTransform<<<100, 256, 0, hipStreamDefault>>>(M_d, Y_d, us.oc * vs.numTileTotal);
-    // HANDLER_ERROR_MSG("kernel panic!!!");
+    HIP_CHECK_KERNEL("Kernel panic!!!");    
+    // COPY_TO_DEVICE_AND_PRINT_ARRAY(Y_d, 10);
 
     destStore<<<dim3(10, 10), dim3(16, 16), 0, hipStreamDefault>>>(Y_d, out_d, os, ts);
-    // HANDLER_ERROR_MSG("kernel panic!!!");
+    HIP_CHECK_KERNEL("Kernel panic!!!");    
+    // COPY_TO_DEVICE_AND_PRINT_ARRAY(out_d, 10);
 }
 
 /*选手需要返回自定义kernel入参结构体的size*/
@@ -514,16 +528,16 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
     TileShape ts = getTileShape(os);
     UShape    us = getUShape(fs);
     VShape    vs = getVShape(is, ts);
-    size_t image_size = n * c * h * w;
-    size_t filter_size = k * c * r * s;
-    size_t packedFilter_size = FLT_H * FLT_W * k * c;
-    size_t packedImage_size = TILE_IN_H * TILE_IN_H * vs.numTileTotal * c;
-    size_t U_size = TILE_IN_H * TILE_IN_W * k * c;
-    size_t V_size = TILE_IN_H * TILE_IN_W * vs.numTileTotal * c;
-    size_t M_size = TILE_IN_H  * TILE_IN_W  * k * vs.numTileTotal;
-    size_t Y_size = TILE_OUT_H * TILE_IN_W  * k * vs.numTileTotal;
-    size_t out_size = n * k * outh * outw;
-    size_t malloc_size = sizeof(_Float16) * (
+    unsigned int image_size = n * c * h * w;
+    unsigned int filter_size = k * c * r * s;
+    unsigned int packedFilter_size = FLT_H * FLT_W * k * c;
+    unsigned int packedImage_size = TILE_IN_H * TILE_IN_H * vs.numTileTotal * c;
+    unsigned int U_size = TILE_IN_H * TILE_IN_W * k * c;
+    unsigned int V_size = TILE_IN_H * TILE_IN_W * vs.numTileTotal * c;
+    unsigned int M_size = TILE_IN_H  * TILE_IN_W  * k * vs.numTileTotal;
+    unsigned int Y_size = TILE_OUT_H * TILE_IN_W  * k * vs.numTileTotal;
+    unsigned int out_size = n * k * outh * outw;
+    unsigned int malloc_size = sizeof(_Float16) * (
         packedFilter_size
         + packedImage_size
         + U_size
@@ -531,23 +545,29 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
         + M_size
         + Y_size
     );
-    printf("malloc_size: %lf GiB\n", malloc_size / 1024.0 / 1024 / 1024);
-    printf("image_size: %lf GiB\n",  sizeof(_Float16) * image_size / 1024.0 / 1024 / 1024);
-    printf("filter_size: %lf GiB\n",  sizeof(_Float16) * filter_size / 1024.0 / 1024 / 1024);
-    printf("packedFilter_size: %lf GiB\n",  sizeof(_Float16) * packedFilter_size / 1024.0 / 1024 / 1024);
-    printf("packedImage_size: %lf GiB\n",  sizeof(_Float16) * packedImage_size / 1024.0 / 1024 / 1024);
-    printf("U_size: %lf GiB\n",  sizeof(_Float16) * U_size / 1024.0 / 1024 / 1024);
-    printf("V_size: %lf GiB\n",  sizeof(_Float16) * V_size / 1024.0 / 1024 / 1024);
-    printf("M_size: %lf GiB\n", sizeof(_Float16) * M_size / 1024.0 / 1024 / 1024 );
-    printf("Y_size: %lf GiB\n",  sizeof(_Float16) * Y_size / 1024.0 / 1024 / 1024);
-    printf("out_size: %lf GiB\n",  sizeof(_Float16) * out_size / 1024.0 / 1024 / 1024 );
+    printf("malloc_size: %u\n", malloc_size  );
+    printf("image_size: %u\n",  sizeof(_Float16) * image_size  );
+    printf("filter_size: %u\n",  sizeof(_Float16) * filter_size  );
+    printf("packedFilter_size: %u\n",  sizeof(_Float16) * packedFilter_size  );
+    printf("packedImage_size: %u\n",  sizeof(_Float16) * packedImage_size  );
+    printf("U_size: %u\n",  sizeof(_Float16) * U_size  );
+    printf("V_size: %u\n",  sizeof(_Float16) * V_size  );
+    printf("M_size: %u\n", sizeof(_Float16) * M_size   );
+    printf("Y_size: %u\n",  sizeof(_Float16) * Y_size  );
+    printf("out_size: %u\n",  sizeof(_Float16) * out_size   );
 
     HIP_CHECK(hipMalloc(&pArgs->packedFilter_d, malloc_size));
+    printf("packedFilter_d: %p\n", pArgs->packedFilter_d);
     pArgs->packedImage_d = pArgs->packedFilter_d + packedFilter_size;
+    printf("packedImage_d: %p\n", pArgs->packedImage_d);
     pArgs->U_d = pArgs->packedImage_d + packedImage_size;
+    printf("U_d: %p\n", pArgs->U_d);
     pArgs->V_d = pArgs->U_d + U_size;
+    printf("V_d: %p\n", pArgs->V_d);
     pArgs->M_d = pArgs->V_d + V_size;
+    printf("M_d: %p\n", pArgs->M_d);
     pArgs->Y_d = pArgs->M_d + M_size;
+    printf("Y_d: %p\n", pArgs->Y_d);
     return 0;
 }
 

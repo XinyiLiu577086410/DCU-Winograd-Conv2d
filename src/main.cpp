@@ -94,7 +94,7 @@ int main(int argc, char**argv)
         
     /*******************************warm up and get result************************************/
     // hipExtLaunchKernel(kernelInfo.kernelPtr,groups,threads,(void**)&param,ldsSize,0,0,0,0);
-    winconv_4x3(&param);
+    winconv_4x3(param);
 
     HIP_CHECK(hipMemcpy(pOut_host, pOut_device,  n*k*outh*outw*sizeof(_Float16), hipMemcpyDeviceToHost));
 
@@ -109,7 +109,7 @@ int main(int argc, char**argv)
     for(int i=0; i<iternum; i++)
     {
         // hipExtLaunchKernel(kernelInfo.kernelPtr,groups,threads,(void**)&param,ldsSize,0,0,0,0); 
-        winconv_4x3(&param);
+        winconv_4x3(param);
     }
     hipEventRecord(stop,0);
 
