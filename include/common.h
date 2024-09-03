@@ -100,67 +100,67 @@ ALWAYS_INLINE double timestamp() {
 static double times_ms[10];
 static double start_time;
 
-// const int64_t k_blk_size = 64;
-// const int64_t c_blk_size = 32;
+// const uint64_t k_blk_size = 64;
+// const uint64_t c_blk_size = 32;
 
 typedef struct {
-  int64_t b;
-  int64_t th;
-  int64_t tw;
+  uint64_t b;
+  uint64_t th;
+  uint64_t tw;
 } TileIndex;
 
 
 // Tensors' shape, pass them when passing tensor as a pointer
 typedef struct {
-  int64_t oc;	// number of output channels
-  int64_t ic;   // number of input channels
-  int64_t h;
-  int64_t w;
+  uint64_t oc;	// number of output channels
+  uint64_t ic;   // number of input channels
+  uint64_t h;
+  uint64_t w;
 } FltShape;
 
 
 typedef struct {
-  int64_t numImg;
-  int64_t ic;   // number of input channels
-  int64_t h;
-  int64_t w;
+  uint64_t numImg;
+  uint64_t ic;   // number of input channels
+  uint64_t h;
+  uint64_t w;
 } ImgShape;
 
 typedef struct {
-  int64_t oc;
-  int64_t ic;   // number of input channels
-  int64_t h;
-  int64_t w;
+  uint64_t oc;
+  uint64_t ic;   // number of input channels
+  uint64_t h;
+  uint64_t w;
 } UShape;
 
 typedef struct {
-  int64_t numTileTotal;
-  int64_t ic;   // number of input channels
-  int64_t h;
-  int64_t w;
+  uint64_t numTileTotal;
+  uint64_t ic;   // number of input channels
+  uint64_t h;
+  uint64_t w;
 } VShape;
 
 typedef struct {
-  int64_t numImg;
-  int64_t oc;   // number of output channels
-  int64_t h;
-  int64_t w;
+  uint64_t numImg;
+  uint64_t oc;   // number of output channels
+  uint64_t h;
+  uint64_t w;
 } OutShape;
 
 typedef struct {
-  int64_t numImg;   // number of output channels
-  int64_t numTilePerImg;
-  int64_t numTileTotal;
-  int64_t h;
-  int64_t w;
+  uint64_t numImg;
+  uint64_t numTilePerImg;
+  uint64_t numTileTotal;
+  uint64_t h;
+  uint64_t w;
 } TileShape;
 
-inline OutShape getOutShape(ImgShape is, FltShape fs) {
+inline OutShape getOutShape(ImgShape is, FltShape fs, uint64_t padding_h, uint64_t padding_w) {
   OutShape os;
   os.numImg = is.numImg;
   os.oc = fs.oc;
-  os.h = is.h - fs.h + 1;
-  os.w = is.w - fs.w + 1;
+  os.h = is.h - fs.h + 1 + 2 * padding_h;
+  os.w = is.w - fs.w + 1 + 2 * padding_w;
   return os;
 }
 
@@ -192,7 +192,7 @@ inline VShape getVShape(ImgShape is, TileShape ts) {
   return vs;
 }
 
-__device__ __host__ TileIndex getTileIndex(int64_t tileNo, TileShape ts) {
+__device__ __host__ TileIndex getTileIndex(uint64_t tileNo, TileShape ts) {
   TileIndex ti;
   ti.b = tileNo / ts.numTilePerImg;
   tileNo = tileNo % ts.numTilePerImg;
@@ -203,13 +203,13 @@ __device__ __host__ TileIndex getTileIndex(int64_t tileNo, TileShape ts) {
 
 
 typedef struct {   // Interval which is [start, end)
-  int64_t start;
-  int64_t end;
-	int64_t len;
+  uint64_t start;
+  uint64_t end;
+	uint64_t len;
 } Interval;
 
 
-inline Interval newInterval(int64_t start, int64_t end) {
+inline Interval newInterval(uint64_t start, uint64_t end) {
 	Interval it;
 	it.start = start;
 	it.end = end;
@@ -217,7 +217,7 @@ inline Interval newInterval(int64_t start, int64_t end) {
   return it;
 }
 
-inline Interval newIntervalWithUpperBound(int64_t start, int64_t step, int64_t upperBound) {
+inline Interval newIntervalWithUpperBound(uint64_t start, uint64_t step, uint64_t upperBound) {
 	Interval it;
 	it.start = start;
 	it.end = MIN(start + step, upperBound);
@@ -227,6 +227,6 @@ inline Interval newIntervalWithUpperBound(int64_t start, int64_t step, int64_t u
 
 /* Parameters */
 
-const int64_t outputChannelBlockSize = 32;
-const int64_t inputChannelBlockSize = 64;
-const int64_t tileBlockSize = 10;
+const uint64_t outputChannelBlockSize = 32;
+const uint64_t inputChannelBlockSize = 64;
+const uint64_t tileBlockSize = 10;
