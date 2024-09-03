@@ -61,13 +61,13 @@ __global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  _Float1
       // z6 = image[0 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
       // z6 = image[b * is.ic * is.h * is.w +  ic * is.h * is.w + (th * 4 + tb) * is.w + (w * 4 + ic)];
       z0 = z1 = z2 = z3 = z4 = z5 = 0.0f;
-      if(th + 0 - padding_h < is.h && tw + w - padding_w < is.w) {
-        z6 = imageTensor[b][ic][th * TILE_OUT_H + 0][tw * TILE_OUT_W + w];
+      if(th * TILE_OUT_H + 0 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
+        z6 = imageTensor[b][ic][th * TILE_OUT_H + 0 - padding_h][tw * TILE_OUT_W + w - padding_w];
         z0 = 4.0f * z6;
       }
       // z6 = image[1 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
-      if(th + 1 - padding_h < is.h && tw + w - padding_w < is.w) {
-        z6 = imageTensor[b][ic][th * TILE_OUT_H + 1][tw * TILE_OUT_W + w];
+      if(th * TILE_OUT_H + 1 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
+        z6 = imageTensor[b][ic][th * TILE_OUT_H + 1 - padding_h][tw * TILE_OUT_W + w - padding_w];
         z1 = -4.0f * z6;
         z2 =  4.0f * z6;
         z3 = -2.0f * z6;
@@ -76,8 +76,8 @@ __global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  _Float1
       }
 
       // z6 = image[2 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
-      if(th + 2 - padding_h < is.h && tw + w - padding_w < is.w) {
-        z6 = imageTensor[b][ic][th * TILE_OUT_H + 2][tw * TILE_OUT_W + w];
+      if(th * TILE_OUT_H + 2 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
+        z6 = imageTensor[b][ic][th * TILE_OUT_H + 2 - padding_h][tw * TILE_OUT_W + w - padding_w];
         z0 += -5.0f * z6;
         z1 += -4.0f * z6;
         z2 += -4.0f * z6;
@@ -86,8 +86,8 @@ __global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  _Float1
       }
 
       // z6 = image[3 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
-      if(th + 3 - padding_h < is.h && tw + w - padding_w < is.w) {
-        z6 = imageTensor[b][ic][th * TILE_OUT_H + 3][tw * TILE_OUT_W + w];
+      if(th * TILE_OUT_H + 3 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
+        z6 = imageTensor[b][ic][th * TILE_OUT_H + 3 - padding_h][tw * TILE_OUT_W + w - padding_w];
         z1 +=  z6;
         z2 += -z6;
         z3 +=  2.0f * z6;
@@ -96,8 +96,8 @@ __global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  _Float1
       }
 
       // z6 = image[4 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
-      if(th + 4 - padding_h < is.h && tw + w - padding_w < is.w) {
-        z6 = imageTensor[b][ic][th * TILE_OUT_H + 4][tw * TILE_OUT_W + w];
+      if(th * TILE_OUT_H + 4 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
+        z6 = imageTensor[b][ic][th * TILE_OUT_H + 4 - padding_h][tw * TILE_OUT_W + w - padding_w];
         z0 += z6;
         z1 += z6;
         z2 += z6;
@@ -106,8 +106,8 @@ __global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  _Float1
       }
 
       // z6 = image[5 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
-      if(th + 5 - padding_h < is.h && tw + w - padding_w < is.w) {
-        z6 = imageTensor[b][ic][th * TILE_OUT_H + 5][tw * TILE_OUT_W + w];
+      if(th * TILE_OUT_H + 5 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
+        z6 = imageTensor[b][ic][th * TILE_OUT_H + 5 - padding_h][tw * TILE_OUT_W + w - padding_w];
         z5 += z6;
       }
 

@@ -18,5 +18,5 @@ module list
 make clean
 make
 # n c h w k r s u v p q
-./winograd 256 192 14 14 192 3 3 1 1 0 0 
+./winograd 256 192 14 14 192 3 3 1 1 1 1
 
