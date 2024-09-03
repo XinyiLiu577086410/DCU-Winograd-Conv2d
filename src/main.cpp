@@ -6,7 +6,7 @@
 #include "conv2d.h"
 #include "error.h"
 extern "C" void winconv_4x3(const void* param_ptr) ;
-extern "C" void free_param(const void* param_ptr) ;
+extern "C" void free_extra_vram(const void* param_ptr) ;
 int main(int argc, char**argv)
 {
     int n = atoi(argv[1]);
@@ -120,7 +120,7 @@ int main(int argc, char**argv)
     hipEventDestroy(start);
     hipEventDestroy(stop);  
     
-    free_param(param);
+    free_extra_vram(param);
 
     free(param);
 
@@ -132,7 +132,7 @@ int main(int argc, char**argv)
     {
         float device_out = pOut_host[i];
         //! was 0.01!!!, for _Fp16 debugging purposes, we need to increase the threshold
-        if((fabs(pOut_host[i] - pOut[i]))/pOut_host[i] > 0.03|| isnan(device_out) ||isinf(device_out))
+        if((fabs(pOut_host[i] - pOut[i]))/pOut_host[i] > 0.01 || isnan(device_out) || isinf(device_out))
         {
             printf("error, postion:%d, gpuvalue:%f, cpuvalue:%f, error: %f\%\n", i, (float)pOut_host[i], (float)pOut[i], ((float)(pOut_host[i] - pOut[i]))/pOut_host[i]*100);
             error++;

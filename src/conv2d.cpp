@@ -15,15 +15,13 @@ typedef struct mykernelParamType
     _Float16*   pweight;                        //权值数据地址
     _Float16*   pout;                           //输出数据地址
     // 额外申请的空间
-    // _Float16*   image_d; 
-    // _Float16*   filter_d;
-    _Float16*   packedImage_d;
-    _Float16*   packedFilter_d;
-    _Float16*   U_d;
-    _Float16*   V_d;
-    _Float16*   M_d;
-    _Float16*   Y_d;
-    // _Float16*   out_d;
+    // _Float16*   packedImage_d;
+    // _Float16*   packedFilter_d;
+    float*   U_d;
+    float*   V_d;
+    float*   M_d;
+    float*   Y_d;
+
     unsigned int      n;                              //batch szie            
     unsigned int      c;                              //channel number        
     unsigned int      h;                              //数据高                
@@ -48,9 +46,9 @@ typedef struct mykernelParamType
 }mykernelParamType;                          
 
 
-__global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  _Float16* __restrict__ V, VShape vs, int simdDimSize, TileShape ts, uint64_t padding_h, uint64_t padding_w) {
+__global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  float* __restrict__ V, VShape vs, int simdDimSize, TileShape ts, uint64_t padding_h, uint64_t padding_w) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  _Float16 z0, z1, z2, z3, z4, z5, z6;
+  float z0, z1, z2, z3, z4, z5, z6;
   while (idx < simdDimSize) {
     const uint64_t ic = idx % vs.ic;
     const TileIndex ti = getTileIndex(idx / vs.ic, ts);
@@ -171,11 +169,11 @@ __global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  _Float1
   }
 }
 
-__global__ void filterTransform(_Float16* __restrict__ filter, _Float16* __restrict__ U, UShape us, int simdDimSize) {
+__global__ void filterTransform(_Float16* __restrict__ filter, float* __restrict__ U, UShape us, int simdDimSize) {
 
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-  _Float16 z0, z1, z2, z3, z4, z5, z6;
+  float z0, z1, z2, z3, z4, z5, z6;
   while (idx < simdDimSize) {
     for (int i = 0; i < FLT_HW; ++i) {
       z6 = filter[idx * FLT_H * FLT_W + 0 * FLT_W  + i];
@@ -244,11 +242,11 @@ __global__ void filterTransform(_Float16* __restrict__ filter, _Float16* __restr
   }
 }
 
-__global__ void destTransform(_Float16* __restrict__ M, _Float16* __restrict__ Y, int simdDimSize) {
+__global__ void destTransform(float* __restrict__ M, float* __restrict__ Y, int simdDimSize) {
 
   int idx = blockIdx.x * blockDim.x + threadIdx.x; 
 
-  _Float16 z0, z1, z2, z3, z4;
+  float z0, z1, z2, z3, z4;
   while (idx < simdDimSize) {
     for (int w = 0; w < TILE_IN_W; ++w) {
       z4 = M[0 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
@@ -397,7 +395,7 @@ __global__ void destTransform(_Float16* __restrict__ M, _Float16* __restrict__ Y
 // }
 
 
-__global__ void destStore(_Float16* __restrict__ Y, _Float16* __restrict__ out, OutShape os,  TileShape ts, uint64_t padding_h, uint64_t padding_w) {
+__global__ void destStore(float* __restrict__ Y, _Float16* __restrict__ out, OutShape os,  TileShape ts, uint64_t padding_h, uint64_t padding_w) {
   for(int h = 0; h < TILE_OUT_H; ++h)
     for(int w = 0; w < TILE_OUT_W; ++w)
       for(int k = blockIdx.x * blockDim.x + threadIdx.x; 
@@ -410,7 +408,7 @@ __global__ void destStore(_Float16* __restrict__ Y, _Float16* __restrict__ out, 
           int n = ti.b, tw = ti.tw, th = ti.th;
           if(th * 4 + h < os.h && tw * 4 + w < os.w) 
             out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + w)] 
-              = Y[h * TILE_IN_W * os.oc * ts.numTileTotal + w * os.oc * ts.numTileTotal + k * ts.numTileTotal + b];
+              = (_Float16) Y[h * TILE_IN_W * os.oc * ts.numTileTotal + w * os.oc * ts.numTileTotal + k * ts.numTileTotal + b];
         }
 }
 
@@ -421,12 +419,12 @@ extern "C" void winconv_4x3(const void* param_ptr) {
     _Float16* filter_d = param->pweight;
     _Float16* image_d  = param->pin;
     _Float16* out_d    = param->pout;
-    _Float16* packedImage_d = param->packedImage_d;
-    _Float16* packedFilter_d = param->packedFilter_d;
-    _Float16* U_d = param->U_d;
-    _Float16* V_d = param->V_d;
-    _Float16* M_d = param->M_d;
-    _Float16* Y_d = param->Y_d;
+    // _Float16* packedImage_d = param->packedImage_d;
+    // _Float16* packedFilter_d = param->packedFilter_d;
+    float* U_d = param->U_d;
+    float* V_d = param->V_d;
+    float* M_d = param->M_d;
+    float* Y_d = param->Y_d;
     uint64_t padding_h = param->p;
     uint64_t padding_w = param->q;
 
@@ -458,24 +456,24 @@ extern "C" void winconv_4x3(const void* param_ptr) {
 
     rocblas_handle handle;
     rocblas_create_handle(&handle);
-    const _Float16 alpha = 1.0, beta = 0.0;
+    const float alpha = 1.0, beta = 0.0;
     rocblas_operation transa = rocblas_operation_transpose, transb = rocblas_operation_none;
     for(int i = 0; i < TILE_IN_H * TILE_IN_W; ++i) {
-        typedef const _Float16 (*UTensor_t) [TILE_IN_W][     us.oc     ][us.ic];
-        typedef _Float16 (*VTensor_t) [TILE_IN_W][vs.numTileTotal][vs.ic];
-        typedef _Float16 (*MTensor_t) [TILE_IN_W][us.oc][vs.numTileTotal];
+        typedef const float (*UTensor_t) [TILE_IN_W][     us.oc     ][us.ic];
+        typedef float (*VTensor_t) [TILE_IN_W][vs.numTileTotal][vs.ic];
+        typedef float (*MTensor_t) [TILE_IN_W][us.oc][vs.numTileTotal];
         UTensor_t UTensor = (UTensor_t) U_d;
         VTensor_t VTensor = (VTensor_t) V_d;
         MTensor_t MTensor = (MTensor_t) M_d;
-        rocblas_hgemm(handle, transa, transb,
+        rocblas_sgemm(handle, transa, transb,
                     vs.numTileTotal, us.oc, us.ic,
                     &alpha,
-                    (const rocblas_half*)(VTensor[i/TILE_IN_W][i%TILE_IN_W]),
+                    (const float*)(VTensor[i/TILE_IN_W][i%TILE_IN_W]),
                     vs.ic, 
-                    (const rocblas_half*)(UTensor[i/TILE_IN_W][i%TILE_IN_W]),
+                    (const float*)(UTensor[i/TILE_IN_W][i%TILE_IN_W]),
                     us.ic, 
                     &beta, 
-                    (rocblas_half*)(MTensor[i/TILE_IN_W][i%TILE_IN_W]),
+                    (float*)(MTensor[i/TILE_IN_W][i%TILE_IN_W]),
                     vs.numTileTotal);
     }
     rocblas_destroy_handle(handle);
@@ -554,48 +552,50 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
     VShape    vs = getVShape(is, ts);
     unsigned int image_size = n * c * h * w;
     unsigned int filter_size = k * c * r * s;
-    unsigned int packedFilter_size = FLT_H * FLT_W * k * c;
-    unsigned int packedImage_size = TILE_IN_H * TILE_IN_H * vs.numTileTotal * c;
+    unsigned int out_size = n * k * outh * outw;
+
+    // unsigned int packedFilter_size = FLT_H * FLT_W * k * c;
+    // unsigned int packedImage_size = TILE_IN_H * TILE_IN_H * vs.numTileTotal * c;
     unsigned int U_size = TILE_IN_H * TILE_IN_W * k * c;
     unsigned int V_size = TILE_IN_H * TILE_IN_W * vs.numTileTotal * c;
     unsigned int M_size = TILE_IN_H  * TILE_IN_W  * k * vs.numTileTotal;
     unsigned int Y_size = TILE_OUT_H * TILE_IN_W  * k * vs.numTileTotal;
-    unsigned int out_size = n * k * outh * outw;
-    unsigned int malloc_size = sizeof(_Float16) * (
-        packedFilter_size
-        + packedImage_size
-        + U_size
+    
+    unsigned int malloc_size = sizeof(float) * (
+        // packedFilter_size
+        // + packedImage_size
+          U_size
         + V_size
         + M_size
         + Y_size
     );
-    printf("malloc_size: %u\n", malloc_size  );
-    printf("image_size: %u\n",  sizeof(_Float16) * image_size  );
-    printf("filter_size: %u\n",  sizeof(_Float16) * filter_size  );
-    printf("packedFilter_size: %u\n",  sizeof(_Float16) * packedFilter_size  );
-    printf("packedImage_size: %u\n",  sizeof(_Float16) * packedImage_size  );
-    printf("U_size: %u\n",  sizeof(_Float16) * U_size  );
-    printf("V_size: %u\n",  sizeof(_Float16) * V_size  );
-    printf("M_size: %u\n", sizeof(_Float16) * M_size   );
-    printf("Y_size: %u\n",  sizeof(_Float16) * Y_size  );
-    printf("out_size: %u\n",  sizeof(_Float16) * out_size   );
+    // printf("malloc_size: %u\n", malloc_size  );
+    // printf("image_size: %u\n",  sizeof(_Float16) * image_size  );
+    // printf("filter_size: %u\n",  sizeof(_Float16) * filter_size  );
+    // // printf("packedFilter_size: %u\n",  sizeof(_Float16) * packedFilter_size  );
+    // // printf("packedImage_size: %u\n",  sizeof(_Float16) * packedImage_size  );
+    // printf("U_size: %u\n",  sizeof(_Float16) * U_size  );
+    // printf("V_size: %u\n",  sizeof(_Float16) * V_size  );
+    // printf("M_size: %u\n", sizeof(_Float16) * M_size   );
+    // printf("Y_size: %u\n",  sizeof(_Float16) * Y_size  );
+    // printf("out_size: %u\n",  sizeof(_Float16) * out_size   );
 
-    HIP_CHECK(hipMalloc(&pArgs->packedFilter_d, malloc_size));
-    printf("packedFilter_d: %p\n", pArgs->packedFilter_d);
-    pArgs->packedImage_d = pArgs->packedFilter_d + packedFilter_size;
-    printf("packedImage_d: %p\n", pArgs->packedImage_d);
-    pArgs->U_d = pArgs->packedImage_d + packedImage_size;
-    printf("U_d: %p\n", pArgs->U_d);
+    HIP_CHECK(hipMalloc(&pArgs->U_d, malloc_size));
+    // printf("packedFilter_d: %p\n", pArgs->packedFilter_d);
+    // pArgs->packedImage_d = pArgs->packedFilter_d + packedFilter_size;
+    // printf("packedImage_d: %p\n", pArgs->packedImage_d);
+    // pArgs->U_d = pArgs->packedImage_d + packedImage_size;
+    // printf("U_d: %p\n", pArgs->U_d);
     pArgs->V_d = pArgs->U_d + U_size;
-    printf("V_d: %p\n", pArgs->V_d);
+    // printf("V_d: %p\n", pArgs->V_d);
     pArgs->M_d = pArgs->V_d + V_size;
-    printf("M_d: %p\n", pArgs->M_d);
+    // printf("M_d: %p\n", pArgs->M_d);
     pArgs->Y_d = pArgs->M_d + M_size;
-    printf("Y_d: %p\n", pArgs->Y_d);
+    // printf("Y_d: %p\n", pArgs->Y_d);
     return 0;
 }
 
-extern "C" void free_param(const void* param_ptr) {
+extern "C" void free_extra_vram(const void* param_ptr) {
     mykernelParamType* pArgs = (mykernelParamType*)param_ptr;
-    hipFree(pArgs->packedFilter_d);
+    hipFree(pArgs->U_d);
 }
