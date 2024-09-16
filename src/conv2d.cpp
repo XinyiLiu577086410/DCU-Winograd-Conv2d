@@ -14,9 +14,7 @@ typedef struct mykernelParamType
     _Float16*   pin;                            //输入数据地址
     _Float16*   pweight;                        //权值数据地址
     _Float16*   pout;                           //输出数据地址
-    // 额外申请的空间
-    // _Float16*   packedImage_d;
-    // _Float16*   packedFilter_d;
+
     float*   U_d;
     float*   V_d;
     float*   M_d;
@@ -56,14 +54,13 @@ __global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  float* 
     typedef _Float16 (*imageTensor_t) [is.ic][is.h][is.w];
     imageTensor_t imageTensor = (imageTensor_t)image;
     for (int w = 0; w < TILE_IN_W; ++w) {
-      // z6 = image[0 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
-      // z6 = image[b * is.ic * is.h * is.w +  ic * is.h * is.w + (th * 4 + tb) * is.w + (w * 4 + ic)];
+     
       z0 = z1 = z2 = z3 = z4 = z5 = 0.0f;
       if(th * TILE_OUT_H + 0 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
         z6 = imageTensor[b][ic][th * TILE_OUT_H + 0 - padding_h][tw * TILE_OUT_W + w - padding_w];
         z0 = 4.0f * z6;
       }
-      // z6 = image[1 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
       if(th * TILE_OUT_H + 1 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
         z6 = imageTensor[b][ic][th * TILE_OUT_H + 1 - padding_h][tw * TILE_OUT_W + w - padding_w];
         z1 = -4.0f * z6;
@@ -73,7 +70,6 @@ __global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  float* 
         z5 =  4.0f * z6;
       }
 
-      // z6 = image[2 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
       if(th * TILE_OUT_H + 2 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
         z6 = imageTensor[b][ic][th * TILE_OUT_H + 2 - padding_h][tw * TILE_OUT_W + w - padding_w];
         z0 += -5.0f * z6;
@@ -83,7 +79,6 @@ __global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  float* 
         z4 += -z6;
       }
 
-      // z6 = image[3 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
       if(th * TILE_OUT_H + 3 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
         z6 = imageTensor[b][ic][th * TILE_OUT_H + 3 - padding_h][tw * TILE_OUT_W + w - padding_w];
         z1 +=  z6;
@@ -93,7 +88,6 @@ __global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  float* 
         z5 += -5.0f * z6;
       }
 
-      // z6 = image[4 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
       if(th * TILE_OUT_H + 4 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
         z6 = imageTensor[b][ic][th * TILE_OUT_H + 4 - padding_h][tw * TILE_OUT_W + w - padding_w];
         z0 += z6;
@@ -103,7 +97,6 @@ __global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  float* 
         z4 += z6;
       }
 
-      // z6 = image[5 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
       if(th * TILE_OUT_H + 5 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
         z6 = imageTensor[b][ic][th * TILE_OUT_H + 5 - padding_h][tw * TILE_OUT_W + w - padding_w];
         z5 += z6;
@@ -296,17 +289,14 @@ __global__ void destTransform(float* __restrict__ M, float* __restrict__ Y, int 
 
       z0 = z4;
 
-      // z4 = svld1(pg, &YTensor[h][1][idx]);
-      // z4 = YTensor[h][1][idx];
+      
       z4 = Y[h * TILE_IN_W * simdDimSize + 1 * simdDimSize + idx];
 
       z0 += z4;
       z1 = z4;
       z2 = z4;
       z3 = z4;
-      
-      // z4 = svld1(pg, &YTensor[h][2][idx]);
-      // z4 = YTensor[h][2][idx];
+
       z4 = Y[h * TILE_IN_W * simdDimSize + 2 * simdDimSize + idx];
       
       z0 += z4;
@@ -314,8 +304,6 @@ __global__ void destTransform(float* __restrict__ M, float* __restrict__ Y, int 
       z2 += z4;
       z3 += -z4;
 
-      // z4 = svld1(pg, &YTensor[h][3][idx]);
-      // z4 = YTensor[h][3][idx];
       z4 = Y[h * TILE_IN_W * simdDimSize + 3 * simdDimSize + idx];
 
       z0 += z4;
@@ -323,8 +311,7 @@ __global__ void destTransform(float* __restrict__ M, float* __restrict__ Y, int 
       z2 += 4.0f * z4;
       z3 += 8.0f * z4;
 
-      // z4 = svld1(pg, &YTensor[h][4][idx]);
-      // z4 = YTensor[h][4][idx];
+
       z4 = Y[h * TILE_IN_W * simdDimSize + 4 * simdDimSize + idx];
 
 
@@ -333,20 +320,11 @@ __global__ void destTransform(float* __restrict__ M, float* __restrict__ Y, int 
       z2 += 4.0f * z4;
       z3 += -8.0f * z4;
 
-      // z4 = svld1(pg, &YTensor[h][5][idx]);
-      // z4 = YTensor[h][5][idx];
+
       z4 = Y[h * TILE_IN_W * simdDimSize + 5 * simdDimSize + idx];
 
       z3 += z4;
 
-      // svst1_f32(pg, &YTensor[h][0][idx], z0);
-      // svst1_f32(pg, &YTensor[h][1][idx], z1);
-      // svst1_f32(pg, &YTensor[h][2][idx], z2);
-      // svst1_f32(pg, &YTensor[h][3][idx], z3);
-      // YTensor[h][0][idx] = z0;
-      // YTensor[h][1][idx] = z1;
-      // YTensor[h][2][idx] = z2;
-      // YTensor[h][3][idx] = z3;
       Y[h * TILE_IN_W * simdDimSize + 0 * simdDimSize + idx] = z0;
       Y[h * TILE_IN_W * simdDimSize + 1 * simdDimSize + idx] = z1;
       Y[h * TILE_IN_W * simdDimSize + 2 * simdDimSize + idx] = z2;
@@ -355,45 +333,6 @@ __global__ void destTransform(float* __restrict__ M, float* __restrict__ Y, int 
     idx += blockDim.x * gridDim.x;
   }
 }
-
-// __global__ void filterOcIcPack(_Float16* __restrict__ filter, FltShape fs, _Float16* __restrict__ packedFilter) {
-//   for(int h = 0; h < FLT_HW; ++h)
-//     for(int w = 0; w < FLT_HW; ++w)
-//       for(int k = blockIdx.x * blockDim.x + threadIdx.x; 
-//           k < fs.oc; 
-//           k += blockDim.x * gridDim.x) {
-//         for(int c = blockIdx.y * blockDim.y + threadIdx.y;
-//             c < fs.ic; 
-//             c += blockDim.y * gridDim.y){ 
-//           packedFilter[h * fs.w * fs.oc * fs.ic + w * fs.oc * fs.ic + k * fs.ic + c] 
-//               = filter[k * fs.ic * fs.h * fs.w + c * fs.h * fs.w + h * fs.w + w];
-//         }
-//       }
-// }
-
-
-// __global__ void ImageTileIcPack(_Float16* __restrict__ image, ImgShape is,  _Float16* __restrict__ packedImage,  TileShape ts) {
-//   for(int tile = blockIdx.x * blockDim.x + threadIdx.x; 
-//       tile < ts.numTileTotal; 
-//       tile += blockDim.x * gridDim.x) {
-//     for(int ic = blockIdx.y * blockDim.y + threadIdx.y;
-//         ic < is.ic;
-//         ic += blockDim.y * gridDim.y) {
-//       for(int h = 0; h < TILE_IN_H; ++h) {
-//         for(int w = 0; w < TILE_IN_W; ++w) {
-//           TileIndex ti = getTileIndex(tile, ts);
-//           int b = ti.b, x = ti.tw, y = ti.th;
-//           if(y * 4 + h < is.h && x * 4 + w < is.w)
-//             packedImage[h * TILE_IN_W * ts.numTileTotal * is.ic + w * ts.numTileTotal * is.ic + tile * is.ic + ic] 
-//               = image[b * is.ic * is.h * is.w + ic * is.h * is.w + (y * 4 + h) * is.w + (x * 4 + w)];
-//           else
-//             packedImage[h * TILE_IN_W * ts.numTileTotal * is.ic + w * ts.numTileTotal * is.ic + tile * is.ic + ic] = 0;
-//         }
-//       }
-//     }
-//   }
-// }
-
 
 __global__ void destStore(float* __restrict__ Y, _Float16* __restrict__ out, OutShape os,  TileShape ts, uint64_t padding_h, uint64_t padding_w) {
   for(int h = 0; h < TILE_OUT_H; ++h)
@@ -419,18 +358,12 @@ extern "C" void winconv_4x3(const void* param_ptr) {
     _Float16* filter_d = param->pweight;
     _Float16* image_d  = param->pin;
     _Float16* out_d    = param->pout;
-    // _Float16* packedImage_d = param->packedImage_d;
-    // _Float16* packedFilter_d = param->packedFilter_d;
     float* U_d = param->U_d;
     float* V_d = param->V_d;
     float* M_d = param->M_d;
     float* Y_d = param->Y_d;
     uint64_t padding_h = param->p;
     uint64_t padding_w = param->q;
-
-    #ifdef __DBG__
-      printf("filter_d: %p, image_d: %p, out_d: %p, packedImage_d: %p, packedFilter_d: %p, U_d: %p, V_d: %p, M_d: %p, Y_d: %p\n", filter_d, image_d, out_d, packedImage_d, packedFilter_d, U_d, V_d, M_d, Y_d);
-    #endif
 
     ImgShape  is = {param->n, param->c, param->h, param->w};
     FltShape  fs = {param->k, param->c, param->r, param->s};
@@ -439,20 +372,11 @@ extern "C" void winconv_4x3(const void* param_ptr) {
     UShape    us = getUShape(fs);
     VShape    vs = getVShape(is, ts);
 
-    // filterOcIcPack<<<dim3(10, 10), dim3(16, 16), 0, hipStreamDefault>>>(filter_d, fs, packedFilter_d);
-    // HIP_CHECK_KERNEL("Kernel panic!!!");    
-    // ImageTileIcPack<<<dim3(10, 10), dim3(16, 16), 0, hipStreamDefault>>>(image_d, is, packedImage_d, ts);
-    // HIP_CHECK_KERNEL("Kernel panic!!!");   
-    #ifdef __DBG__
-      COPY_TO_HOST_AND_PRINT_ARRAY(packedImage_d, 1);
-      // COPY_TO_DEVICE_AND_PRINT_ARRAY(packedImage_d, 10);
-    #endif
+
     srcTransform<<<100, 256, 0, hipStreamDefault>>>(image_d, is, V_d, vs, vs.ic * vs.numTileTotal, ts, padding_h, padding_w);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
-    // COPY_TO_DEVICE_AND_PRINT_ARRAY(V_d, 10);
     filterTransform<<<100, 256, 0, hipStreamDefault>>>(filter_d, U_d, us, us.ic * us.oc);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
-    // COPY_TO_DEVICE_AND_PRINT_ARRAY(U_d, 10);
 
     rocblas_handle handle;
     rocblas_create_handle(&handle);
@@ -477,15 +401,12 @@ extern "C" void winconv_4x3(const void* param_ptr) {
                     vs.numTileTotal);
     }
     rocblas_destroy_handle(handle);
-    // COPY_TO_DEVICE_AND_PRINT_ARRAY(M_d, 10);
 
     destTransform<<<100, 256, 0, hipStreamDefault>>>(M_d, Y_d, us.oc * vs.numTileTotal);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
-    // COPY_TO_DEVICE_AND_PRINT_ARRAY(Y_d, 10);
 
     destStore<<<dim3(10, 10), dim3(16, 16), 0, hipStreamDefault>>>(Y_d, out_d, os, ts, padding_h, padding_w);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
-    // COPY_TO_DEVICE_AND_PRINT_ARRAY(out_d, 10);
 }
 
 /*选手需要返回自定义kernel入参结构体的size*/
@@ -554,44 +475,24 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
     unsigned int filter_size = k * c * r * s;
     unsigned int out_size = n * k * outh * outw;
 
-    // unsigned int packedFilter_size = FLT_H * FLT_W * k * c;
-    // unsigned int packedImage_size = TILE_IN_H * TILE_IN_H * vs.numTileTotal * c;
     unsigned int U_size = TILE_IN_H * TILE_IN_W * k * c;
     unsigned int V_size = TILE_IN_H * TILE_IN_W * vs.numTileTotal * c;
     unsigned int M_size = TILE_IN_H  * TILE_IN_W  * k * vs.numTileTotal;
     unsigned int Y_size = TILE_OUT_H * TILE_IN_W  * k * vs.numTileTotal;
     
     unsigned int malloc_size = sizeof(float) * (
-        // packedFilter_size
-        // + packedImage_size
           U_size
         + V_size
         + M_size
         + Y_size
     );
-    // printf("malloc_size: %u\n", malloc_size  );
-    // printf("image_size: %u\n",  sizeof(_Float16) * image_size  );
-    // printf("filter_size: %u\n",  sizeof(_Float16) * filter_size  );
-    // // printf("packedFilter_size: %u\n",  sizeof(_Float16) * packedFilter_size  );
-    // // printf("packedImage_size: %u\n",  sizeof(_Float16) * packedImage_size  );
-    // printf("U_size: %u\n",  sizeof(_Float16) * U_size  );
-    // printf("V_size: %u\n",  sizeof(_Float16) * V_size  );
-    // printf("M_size: %u\n", sizeof(_Float16) * M_size   );
-    // printf("Y_size: %u\n",  sizeof(_Float16) * Y_size  );
-    // printf("out_size: %u\n",  sizeof(_Float16) * out_size   );
+    
 
     HIP_CHECK(hipMalloc(&pArgs->U_d, malloc_size));
-    // printf("packedFilter_d: %p\n", pArgs->packedFilter_d);
-    // pArgs->packedImage_d = pArgs->packedFilter_d + packedFilter_size;
-    // printf("packedImage_d: %p\n", pArgs->packedImage_d);
-    // pArgs->U_d = pArgs->packedImage_d + packedImage_size;
-    // printf("U_d: %p\n", pArgs->U_d);
+    
     pArgs->V_d = pArgs->U_d + U_size;
-    // printf("V_d: %p\n", pArgs->V_d);
     pArgs->M_d = pArgs->V_d + V_size;
-    // printf("M_d: %p\n", pArgs->M_d);
     pArgs->Y_d = pArgs->M_d + M_size;
-    // printf("Y_d: %p\n", pArgs->Y_d);
     return 0;
 }
 
