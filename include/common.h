@@ -17,6 +17,7 @@
 #endif
 
 #define FP32_PER_REG 16
+#define BLOCK_DIM 256
 
 #define DECLARE_SVE_FP32_REGS() \
 		svfloat32_t	z0; \
