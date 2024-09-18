@@ -5,8 +5,7 @@
 #include "conv2d.h"
 #include "common.h"
 #include "error.h"
-#include <rocblas.h>
-
+#include "hep_sgemm.h"
 
 /*选手自定义的kernel入参结构体*/
 typedef struct mykernelParamType
@@ -43,55 +42,65 @@ typedef struct mykernelParamType
     unsigned int      revs7;                          //预留
 }mykernelParamType;                          
 
-
-__global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  float* __restrict__ V, VShape vs, int simdDimSize, TileShape ts, uint64_t padding_h, uint64_t padding_w) {
-  __shared__ float tmp[BLOCK_DIM][TILE_IN_H][TILE_IN_W];
+template <typename inoutT, 
+          typename calcT>
+__global__ void srcTransform(_Float16* __restrict__ image, 
+                             ImgShape               is,  
+                             void*     __restrict__ V_, 
+                             VShape                 vs, 
+                             int                    simdDimSize, 
+                             TileShape              ts, 
+                             uint64_t               padding_h, 
+                             uint64_t               padding_w)
+{
+  auto V = reinterpret_cast<inoutT*>(V_);
+  __shared__ calcT tmp[BLOCK_DIM][TILE_IN_H][TILE_IN_W];
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   int itx = threadIdx.x;
-  float z0, z1, z2, z3, z4, z5, z6;
+  calcT z0, z1, z2, z3, z4, z5, z6;
   while (idx < simdDimSize) {
-    const uint64_t ic = idx % vs.ic;
+    const uint64_t  ic = idx % vs.ic;
     const TileIndex ti = getTileIndex(idx / vs.ic, ts);
-    const uint64_t b = ti.b, th = ti.th, tw = ti.tw;
+    const uint64_t  b  = ti.b, th = ti.th, tw = ti.tw;
     typedef _Float16 (*imageTensor_t) [is.ic][is.h][is.w];
     imageTensor_t imageTensor = (imageTensor_t)image;
     for (int w = 0; w < TILE_IN_W; ++w) {
     
-      z0 = z1 = z2 = z3 = z4 = z5 = 0.0f;
+      z0 = z1 = z2 = z3 = z4 = z5 = (calcT)0.0;
       if(th * TILE_OUT_H + 0 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
-        z6 = imageTensor[b][ic][th * TILE_OUT_H + 0 - padding_h][tw * TILE_OUT_W + w - padding_w];
-        z0 = 4.0f * z6;
+        z6 = (calcT)imageTensor[b][ic][th * TILE_OUT_H + 0 - padding_h][tw * TILE_OUT_W + w - padding_w];
+        z0 = ((calcT)4.0f) * z6;
       }
 
       if(th * TILE_OUT_H + 1 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
-        z6 = imageTensor[b][ic][th * TILE_OUT_H + 1 - padding_h][tw * TILE_OUT_W + w - padding_w];
-        z1 = -4.0f * z6;
-        z2 =  4.0f * z6;
-        z3 = -2.0f * z6;
-        z4 =  2.0f * z6;
-        z5 =  4.0f * z6;
+        z6 = (calcT)imageTensor[b][ic][th * TILE_OUT_H + 1 - padding_h][tw * TILE_OUT_W + w - padding_w];
+        z1 = ((calcT)-4.0f) * z6;
+        z2 = ((calcT) 4.0f) * z6;
+        z3 = ((calcT)-2.0f) * z6;
+        z4 = ((calcT) 2.0f) * z6;
+        z5 = ((calcT) 4.0f) * z6;
       }
 
       if(th * TILE_OUT_H + 2 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
-        z6 = imageTensor[b][ic][th * TILE_OUT_H + 2 - padding_h][tw * TILE_OUT_W + w - padding_w];
-        z0 += -5.0f * z6;
-        z1 += -4.0f * z6;
-        z2 += -4.0f * z6;
+        z6 =  (calcT)imageTensor[b][ic][th * TILE_OUT_H + 2 - padding_h][tw * TILE_OUT_W + w - padding_w];
+        z0 += ((calcT)-5.0f) * z6;
+        z1 += ((calcT)-4.0f) * z6;
+        z2 += ((calcT)-4.0f) * z6;
         z3 += -z6;
         z4 += -z6;
       }
 
       if(th * TILE_OUT_H + 3 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
-        z6 = imageTensor[b][ic][th * TILE_OUT_H + 3 - padding_h][tw * TILE_OUT_W + w - padding_w];
+        z6 =  (calcT)imageTensor[b][ic][th * TILE_OUT_H + 3 - padding_h][tw * TILE_OUT_W + w - padding_w];
         z1 +=  z6;
         z2 += -z6;
-        z3 +=  2.0f * z6;
-        z4 += -2.0f * z6;
-        z5 += -5.0f * z6;
+        z3 += ((calcT) 2.0f) * z6;
+        z4 += ((calcT)-2.0f) * z6;
+        z5 += ((calcT)-5.0f) * z6;
       }
 
       if(th * TILE_OUT_H + 4 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
-        z6 = imageTensor[b][ic][th * TILE_OUT_H + 4 - padding_h][tw * TILE_OUT_W + w - padding_w];
+        z6 =  (calcT)imageTensor[b][ic][th * TILE_OUT_H + 4 - padding_h][tw * TILE_OUT_W + w - padding_w];
         z0 += z6;
         z1 += z6;
         z2 += z6;
@@ -100,7 +109,7 @@ __global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  float* 
       }
 
       if(th * TILE_OUT_H + 5 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
-        z6 = imageTensor[b][ic][th * TILE_OUT_H + 5 - padding_h][tw * TILE_OUT_W + w - padding_w];
+        z6 =  (calcT)imageTensor[b][ic][th * TILE_OUT_H + 5 - padding_h][tw * TILE_OUT_W + w - padding_w];
         z5 += z6;
       }
 
@@ -116,21 +125,21 @@ __global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  float* 
     for (int h = 0; h < TILE_IN_H; ++h) {
       z6 = tmp[itx][h][0];
 
-      z0 = 4.0f * z6;
+      z0 = ((calcT)4.0f) * z6;
 
       z6 = tmp[itx][h][1];
 
-      z1 = -4.0f * z6;
-      z2 =  4.0f * z6;
-      z3 = -2.0f * z6;
-      z4 =  2.0f * z6;
-      z5 =  4.0f * z6;
+      z1 = ((calcT)-4.0f) * z6;
+      z2 = ((calcT) 4.0f) * z6;
+      z3 = ((calcT)-2.0f) * z6;
+      z4 = ((calcT) 2.0f) * z6;
+      z5 = ((calcT) 4.0f) * z6;
 
       z6 = tmp[itx][h][2];
 
-      z0 += -5.0f * z6;
-      z1 += -4.0f * z6;
-      z2 += -4.0f * z6;
+      z0 += ((calcT)-5.0f) * z6;
+      z1 += ((calcT)-4.0f) * z6;
+      z2 += ((calcT)-4.0f) * z6;
       z3 += -z6;
       z4 += -z6;
 
@@ -138,9 +147,9 @@ __global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  float* 
 
       z1 +=  z6;
       z2 += -z6;
-      z3 +=  2.0f * z6;
-      z4 += -2.0f * z6;
-      z5 += -5.0f * z6;
+      z3 += ((calcT) 2.0f) * z6;
+      z4 += ((calcT)-2.0f) * z6;
+      z5 += ((calcT)-5.0f) * z6;
 
       z6 = tmp[itx][h][4];
 
@@ -165,36 +174,42 @@ __global__ void srcTransform(_Float16* __restrict__ image, ImgShape is,  float* 
   }
 }
 
-__global__ void filterTransform(_Float16* __restrict__ filter, float* __restrict__ U, UShape us, int simdDimSize) {
-
-  __shared__ float tmp[BLOCK_DIM][TILE_IN_H][TILE_IN_W] ;
+template <typename inoutT, 
+          typename calcT>
+__global__ void filterTransform(_Float16* __restrict__ filter, 
+                                void*     __restrict__ U_,
+                                UShape                 us, 
+                                int                    simdDimSize) 
+{
+  auto U = reinterpret_cast<inoutT*>(U_);
+  __shared__ calcT tmp[BLOCK_DIM][TILE_IN_H][TILE_IN_W] ;
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   int itx = threadIdx.x;
 
-  float z0, z1, z2, z3, z4, z5, z6;
+  calcT z0, z1, z2, z3, z4, z5, z6;
   while (idx < simdDimSize) {
     for (int i = 0; i < FLT_HW; ++i) {
       z6 = filter[idx * FLT_H * FLT_W + 0 * FLT_W  + i];
 
-      z0 = (1.0f / 4.0f)  * z6;
-      z1 = (-1.0f / 6.0f) * z6;
-      z2 = (-1.0f / 6.0f) * z6;
-      z3 = (1.0f / 24.0f) * z6;
-      z4 = (1.0f / 24.0f) * z6;
+      z0 = ((calcT)( 1.0f / 4.0f )) * z6;
+      z1 = ((calcT)(-1.0f / 6.0f )) * z6;
+      z2 = ((calcT)(-1.0f / 6.0f )) * z6;
+      z3 = ((calcT)( 1.0f / 24.0f)) * z6;
+      z4 = ((calcT)( 1.0f / 24.0f)) * z6;
 
       z6 = filter[idx * FLT_H * FLT_W + 1 * FLT_W  + i];
 
-      z1 += (-1.0f / 6.0f)  * z6;
-      z2 += ( 1.0f / 6.0f)  * z6;
-      z3 += (1.0f  / 12.0f) * z6;
-      z4 += (-1.0f / 12.0f) * z6;
+      z1 += ((calcT)(-1.0f / 6.0f )) * z6;
+      z2 += ((calcT)( 1.0f / 6.0f )) * z6;
+      z3 += ((calcT)( 1.0f / 12.0f)) * z6;
+      z4 += ((calcT)(-1.0f / 12.0f)) * z6;
 
       z6 = filter[idx * FLT_H * FLT_W + 2 * FLT_W  + i];
 
-      z1 += (-1.0f / 6.0f) * z6;
-      z2 += (-1.0f / 6.0f) * z6;
-      z3 += ( 1.0f / 6.0f) * z6;
-      z4 += ( 1.0f / 6.0f) * z6;
+      z1 += ((calcT)(-1.0f / 6.0f)) * z6;
+      z2 += ((calcT)(-1.0f / 6.0f)) * z6;
+      z3 += ((calcT)( 1.0f / 6.0f)) * z6;
+      z4 += ((calcT)( 1.0f / 6.0f)) * z6;
       z5 = z6;
 
       tmp[itx][0][i] = z0;
@@ -208,25 +223,25 @@ __global__ void filterTransform(_Float16* __restrict__ filter, float* __restrict
     for (int i = 0; i < TILE_IN_H; ++i) {
       z6 = tmp[itx][i][0];
 
-      z0 = (1.0f / 4.0f)  * z6;
-      z1 = (-1.0f / 6.0f) * z6;
-      z2 = (-1.0f / 6.0f) * z6;
-      z3 = (1.0f / 24.0f) * z6;
-      z4 = (1.0f / 24.0f) * z6;
+      z0 = ((calcT)( 1.0f / 4.0f )) * z6;
+      z1 = ((calcT)(-1.0f / 6.0f )) * z6;
+      z2 = ((calcT)(-1.0f / 6.0f )) * z6;
+      z3 = ((calcT)( 1.0f / 24.0f)) * z6;
+      z4 = ((calcT)( 1.0f / 24.0f)) * z6;
 
       z6 = tmp[itx][i][1];
 
-      z1 += (-1.0f / 6.0f)  * z6;
-      z2 += ( 1.0f / 6.0f)  * z6;
-      z3 += (1.0f  / 12.0f) * z6;
-      z4 += (-1.0f / 12.0f) * z6;
+      z1 += ((calcT)(-1.0f / 6.0f )) * z6;
+      z2 += ((calcT)( 1.0f / 6.0f )) * z6;
+      z3 += ((calcT)( 1.0f / 12.0f)) * z6;
+      z4 += ((calcT)(-1.0f / 12.0f)) * z6;
 
       z6 = tmp[itx][i][2];
 
-      z1 += (-1.0f / 6.0f) * z6;
-      z2 += (-1.0f / 6.0f) * z6;
-      z3 += ( 1.0f / 6.0f) * z6;
-      z4 += ( 1.0f / 6.0f) * z6;
+      z1 += ((calcT)(-1.0f / 6.0f)) * z6;
+      z2 += ((calcT)(-1.0f / 6.0f)) * z6;
+      z3 += ((calcT)( 1.0f / 6.0f)) * z6;
+      z4 += ((calcT)( 1.0f / 6.0f)) * z6;
       z5 = z6;
 
       U[i * TILE_IN_W * simdDimSize + 0 * simdDimSize + idx] = z0;
@@ -240,13 +255,20 @@ __global__ void filterTransform(_Float16* __restrict__ filter, float* __restrict
     idx += blockDim.x * gridDim.x;
   }
 }
-
-__global__ void destTransform(float* __restrict__ M, float* __restrict__ Y, int simdDimSize, _Float16* __restrict__ out, OutShape os,  TileShape ts) {
-  __shared__ float tmp[BLOCK_DIM][TILE_OUT_H][TILE_IN_W];
+template <typename inoutT, 
+          typename calcT>
+__global__ void destTransformStore(void* __restrict__    M_, 
+                                   int                   simdDimSize,
+                                  _Float16* __restrict__ out, 
+                                  OutShape               os,  
+                                  TileShape              ts) 
+{
+  auto M = reinterpret_cast<inoutT*>(M_);
+  __shared__ calcT tmp[BLOCK_DIM][TILE_OUT_H][TILE_IN_W];
   int idx = blockIdx.x * blockDim.x + threadIdx.x; 
   int itx = threadIdx.x;
 
-  float z0, z1, z2, z3, z4;
+  calcT z0, z1, z2, z3, z4;
   while (idx < simdDimSize) {
     for (int w = 0; w < TILE_IN_W; ++w) {
       z4 = M[0 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
@@ -262,24 +284,24 @@ __global__ void destTransform(float* __restrict__ M, float* __restrict__ Y, int 
       
       z4 = M[2 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
 
-      z0 += z4;
+      z0 +=  z4;
       z1 += -z4;
-      z2 += z4;
+      z2 +=  z4;
       z3 += -z4;
 
       z4 = M[3 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
 
       z0 += z4;
-      z1 += 2.0f * z4;
-      z2 += 4.0f * z4;
-      z3 += 8.0f * z4;
+      z1 += ((calcT)2.0f) * z4;
+      z2 += ((calcT)4.0f) * z4;
+      z3 += ((calcT)8.0f) * z4;
 
       z4 = M[4 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
 
       z0 += z4;
-      z1 += -2.0f * z4;
-      z2 += 4.0f * z4;
-      z3 += -8.0f * z4;
+      z1 += ((calcT)-2.0f) * z4;
+      z2 += ((calcT) 4.0f) * z4;
+      z3 += ((calcT)-8.0f) * z4;
 
       z4 = M[5 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
 
@@ -314,18 +336,18 @@ __global__ void destTransform(float* __restrict__ M, float* __restrict__ Y, int 
       z4 = tmp[itx][h][3];
 
       z0 += z4;
-      z1 += 2.0f * z4;
-      z2 += 4.0f * z4;
-      z3 += 8.0f * z4;
+      z1 += ((calcT)2.0f) * z4;
+      z2 += ((calcT)4.0f) * z4;
+      z3 += ((calcT)8.0f) * z4;
 
 
       z4 = tmp[itx][h][4];
 
 
       z0 += z4;
-      z1 += -2.0f * z4;
-      z2 += 4.0f * z4;
-      z3 += -8.0f * z4;
+      z1 += ((calcT)-2.0f) * z4;
+      z2 += ((calcT) 4.0f) * z4;
+      z3 += ((calcT)-8.0f) * z4;
 
 
       z4 = tmp[itx][h][5];
@@ -347,36 +369,21 @@ __global__ void destTransform(float* __restrict__ M, float* __restrict__ Y, int 
       if(th * 4 + h < os.h && tw * 4 + 3 < os.w)
         out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 3)] = (_Float16) z3;
 
-
     }
     idx += blockDim.x * gridDim.x;
   }
 }
 
-__global__ void destStore(float* __restrict__ Y, _Float16* __restrict__ out, OutShape os,  TileShape ts) {
-  for(int h = 0; h < TILE_OUT_H; ++h)
-    for(int w = 0; w < TILE_OUT_W; ++w)
-      for(int k = blockIdx.x * blockDim.x + threadIdx.x; k < os.oc; k += blockDim.x * gridDim.x)
-        for(int b = blockIdx.y * blockDim.y + threadIdx.y; b < ts.numTileTotal; b += blockDim.y * gridDim.y) {
-          TileIndex ti = getTileIndex(b, ts);
-          int n = ti.b, tw = ti.tw, th = ti.th;
-          if(th * 4 + h < os.h && tw * 4 + w < os.w) 
-            out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + w)] 
-              = (_Float16) Y[h * TILE_IN_W * os.oc * ts.numTileTotal + w * os.oc * ts.numTileTotal + k * ts.numTileTotal + b];
-        }
-}
-
 
 extern "C" void winconv_4x3(const void* param_ptr) {
-    
     const mykernelParamType* param = (const mykernelParamType*)param_ptr;
     _Float16* filter_d = param->pweight;
     _Float16* image_d  = param->pin;
     _Float16* out_d    = param->pout;
-    float* U_d = param->U_d;
-    float* V_d = param->V_d;
-    float* M_d = param->M_d;
-    float* Y_d = param->Y_d;
+    void* U_d = reinterpret_cast<void*> (param->U_d);
+    void* V_d = reinterpret_cast<void*> (param->V_d);
+    void* M_d = reinterpret_cast<void*> (param->M_d);
+    void* Y_d = reinterpret_cast<void*> (param->Y_d);
     uint64_t padding_h = param->p;
     uint64_t padding_w = param->q;
 
@@ -388,36 +395,33 @@ extern "C" void winconv_4x3(const void* param_ptr) {
     VShape    vs = getVShape(is, ts);
 
 
-    srcTransform<<<16384, BLOCK_DIM>>>(image_d, is, V_d, vs, vs.ic * vs.numTileTotal, ts, padding_h, padding_w);
+    srcTransform<_Float16, _Float16><<<16384, BLOCK_DIM>>>(image_d, is, V_d, vs, vs.ic * vs.numTileTotal, ts, padding_h, padding_w);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
-    filterTransform<<<16384, BLOCK_DIM>>>(filter_d, U_d, us, us.ic * us.oc);
+    filterTransform<_Float16, _Float16><<<16384, BLOCK_DIM>>>(filter_d, U_d, us, us.ic * us.oc);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
 
-    rocblas_handle handle;
-    rocblas_create_handle(&handle);
     const float alpha = 1.0, beta = 0.0;
-    rocblas_operation transa = rocblas_operation_transpose, transb = rocblas_operation_none;
     for(int i = 0; i < TILE_IN_H * TILE_IN_W; ++i) {
-        typedef const float (*UTensor_t) [TILE_IN_W][     us.oc     ][us.ic];
-        typedef float (*VTensor_t) [TILE_IN_W][vs.numTileTotal][vs.ic];
-        typedef float (*MTensor_t) [TILE_IN_W][us.oc][vs.numTileTotal];
+        typedef const _Float16 (*UTensor_t) [TILE_IN_W][     us.oc     ][us.ic];
+        typedef _Float16 (*VTensor_t) [TILE_IN_W][vs.numTileTotal][vs.ic];
+        typedef _Float16 (*MTensor_t) [TILE_IN_W][us.oc][vs.numTileTotal];
         UTensor_t UTensor = (UTensor_t) U_d;
         VTensor_t VTensor = (VTensor_t) V_d;
         MTensor_t MTensor = (MTensor_t) M_d;
-        rocblas_sgemm(handle, transa, transb,
-                    vs.numTileTotal, us.oc, us.ic,
-                    &alpha,
-                    (const float*)(VTensor[i/TILE_IN_W][i%TILE_IN_W]),
-                    vs.ic, 
-                    (const float*)(UTensor[i/TILE_IN_W][i%TILE_IN_W]),
-                    us.ic, 
-                    &beta, 
-                    (float*)(MTensor[i/TILE_IN_W][i%TILE_IN_W]),
-                    vs.numTileTotal);
+        hep_sgemm<_Float16, float>(vs.numTileTotal, us.oc, us.ic,
+                              alpha,
+                              (void*)(VTensor[i/TILE_IN_W][i%TILE_IN_W]),
+                              vs.ic, 
+                              (void*)(UTensor[i/TILE_IN_W][i%TILE_IN_W]),
+                              us.ic, 
+                              beta, 
+                              (void*)(MTensor[i/TILE_IN_W][i%TILE_IN_W]),
+                              vs.numTileTotal,
+                              1,
+                              hipStreamDefault);
     }
-    rocblas_destroy_handle(handle);
 
-    destTransform<<<16384, BLOCK_DIM>>>(M_d, Y_d, us.oc * vs.numTileTotal, out_d, os, ts);
+    destTransformStore<_Float16, _Float16><<<16384, BLOCK_DIM>>>(M_d, us.oc * vs.numTileTotal, out_d, os, ts);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
    
 }
