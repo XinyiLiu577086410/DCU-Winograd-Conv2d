@@ -396,9 +396,9 @@ extern "C" void winconv_4x3(const void* param_ptr) {
 
 
     srcTransform<_Float16, _Float16><<<16384, BLOCK_DIM>>>(image_d, is, V_d, vs, vs.ic * vs.numTileTotal, ts, padding_h, padding_w);
-    HIP_CHECK_KERNEL("Kernel panic!!!");    
+    // HIP_CHECK_KERNEL("Kernel panic!!!");    
     filterTransform<_Float16, _Float16><<<16384, BLOCK_DIM>>>(filter_d, U_d, us, us.ic * us.oc);
-    HIP_CHECK_KERNEL("Kernel panic!!!");    
+    // HIP_CHECK_KERNEL("Kernel panic!!!");    
 
     const float alpha = 1.0, beta = 0.0;
     for(int i = 0; i < TILE_IN_H * TILE_IN_W; ++i) {
@@ -422,7 +422,7 @@ extern "C" void winconv_4x3(const void* param_ptr) {
     }
 
     destTransformStore<_Float16, _Float16><<<16384, BLOCK_DIM>>>(M_d, us.oc * vs.numTileTotal, out_d, os, ts);
-    HIP_CHECK_KERNEL("Kernel panic!!!");    
+    // HIP_CHECK_KERNEL("Kernel panic!!!");    
    
 }
 
@@ -504,7 +504,7 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
         + Y_size
     );
     
-    HIP_CHECK(hipMalloc(&pArgs->U_d, malloc_size));
+    hipMalloc(&pArgs->U_d, malloc_size);
     
     pArgs->V_d = pArgs->U_d + U_size;
     pArgs->M_d = pArgs->V_d + V_size;
