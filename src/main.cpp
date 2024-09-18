@@ -4,7 +4,6 @@
 #include <hip/hip_ext.h>
 #include "verfiy.h"
 #include "conv2d.h"
-#include "error.h"
 extern "C" void winconv_4x3(const void* param_ptr) ;
 extern "C" void free_extra_vram(const void* param_ptr) ;
 int main(int argc, char**argv)
