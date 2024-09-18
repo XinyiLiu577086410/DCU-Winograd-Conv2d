@@ -1,5 +1,5 @@
-#include <cinttypes>
 #include <cstdio>
+#include <cstdint>
 #include <hip/hip_runtime.h>
 #include <hip/hip_ext.h>
 #include "conv2d.h"
