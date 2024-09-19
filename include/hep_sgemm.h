@@ -214,20 +214,21 @@ static void hep_sgemm(int32_t       m,
 	auto dA = reinterpret_cast<inoutT*>(dA_);
 	auto dB = reinterpret_cast<inoutT*>(dB_);
 	auto dC = reinterpret_cast<inoutT*>(dC_);
-    if((m % 64 == 0) && (n % 64 == 0) && (k % 4 == 0))
-    {
-        //m is mult of 64, n is mult of 64, k is mult of 4
-        const int dim_m = 16;
-        const int dim_n = 16;
-        const int blk_m = 64;
-        const int blk_n = 64;
-        const int blk_k = 4;
-        dim3      dimBlock(dim_m, dim_n, 1);
-        dim3      dimGrid(m / blk_m, n / blk_n, batch_count);
-        // assert(alpha == 1.0 && beta == 0.0)
-        gemm_batched_kernel<inoutT, calcT, dim_m, dim_n, blk_m, blk_n, blk_k, blk_m, blk_k, blk_k, blk_n><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc, batch_count);
-    }
-    else if((m % 32 == 0) && (n % 32 == 0) && (k % 8 == 0))
+    // if((m % 64 == 0) && (n % 64 == 0) && (k % 4 == 0))
+    // {
+    //     //m is mult of 64, n is mult of 64, k is mult of 4
+    //     const int dim_m = 16;
+    //     const int dim_n = 16;
+    //     const int blk_m = 64;
+    //     const int blk_n = 64;
+    //     const int blk_k = 4;
+    //     dim3      dimBlock(dim_m, dim_n, 1);
+    //     dim3      dimGrid(m / blk_m, n / blk_n, batch_count);
+    //     // assert(alpha == 1.0 && beta == 0.0)
+    //     gemm_batched_kernel<inoutT, calcT, dim_m, dim_n, blk _m, blk_n, blk_k, blk_m, blk_k, blk_k, blk_n><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc, batch_count);
+    // }
+    // else 
+    if((m % 32 == 0) && (n % 32 == 0) && (k % 8 == 0))
     {
         // m is mult of 32, n is mult of 32, k is mult of 8
         const int dim_m = 16;
