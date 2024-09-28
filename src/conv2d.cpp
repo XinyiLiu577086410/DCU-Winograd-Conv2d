@@ -14,10 +14,10 @@ typedef struct mykernelParamType
     _Float16*   pweight;                        //权值数据地址
     _Float16*   pout;                           //输出数据地址
 
-    float*   U_d;
-    float*   V_d;
-    float*   M_d;
-    float*   Y_d;
+    _Float16*   U_d;
+    _Float16*   V_d;
+    _Float16*   M_d;
+    _Float16*   Y_d;
 
     unsigned int      n;                              //batch szie            
     unsigned int      c;                              //channel number        
@@ -396,9 +396,9 @@ extern "C" void winconv_4x3(const void* param_ptr) {
 
 
     srcTransform<_Float16, _Float16><<<16384, BLOCK_DIM>>>(image_d, is, V_d, vs, vs.ic * vs.numTileTotal, ts, padding_h, padding_w);
-    // HIP_CHECK_KERNEL("Kernel panic!!!");    
+    HIP_CHECK_KERNEL("Kernel panic!!!");    
     filterTransform<_Float16, _Float16><<<16384, BLOCK_DIM>>>(filter_d, U_d, us, us.ic * us.oc);
-    // HIP_CHECK_KERNEL("Kernel panic!!!");    
+    HIP_CHECK_KERNEL("Kernel panic!!!");    
 
     const float alpha = 1.0, beta = 0.0;
     for(int i = 0; i < TILE_IN_H * TILE_IN_W; ++i) {
@@ -422,7 +422,7 @@ extern "C" void winconv_4x3(const void* param_ptr) {
     }
 
     destTransformStore<_Float16, _Float16><<<16384, BLOCK_DIM>>>(M_d, us.oc * vs.numTileTotal, out_d, os, ts);
-    // HIP_CHECK_KERNEL("Kernel panic!!!");    
+    HIP_CHECK_KERNEL("Kernel panic!!!");    
    
 }
 
@@ -496,8 +496,13 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
     unsigned int V_size = TILE_IN_H * TILE_IN_W * vs.numTileTotal * c;
     unsigned int M_size = TILE_IN_H  * TILE_IN_W  * k * vs.numTileTotal;
     unsigned int Y_size = TILE_OUT_H * TILE_IN_W  * k * vs.numTileTotal;
-    
-    unsigned int malloc_size = sizeof(float) * (
+#ifdef DBG
+    printf("U(filter): %ld MiB\n", U_size * sizeof(_Float16) / 1024 / 1024);
+    printf("V(image): %ld MiB\n", V_size * sizeof(_Float16) / 1024 / 1024);
+    printf("M: %ld MiB\n", M_size * sizeof(_Float16) / 1024 / 1024);
+    printf("Y: %ld MiB\n", Y_size * sizeof(_Float16) / 1024 / 1024);
+#endif
+    unsigned int malloc_size = sizeof(_Float16) * (
           U_size
         + V_size
         + M_size
