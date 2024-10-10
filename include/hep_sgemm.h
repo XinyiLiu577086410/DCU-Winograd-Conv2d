@@ -2,16 +2,18 @@
 #include <cstdint>
 #define HEP_WARP_SIZE 64
 
-typedef float float4_ __attribute__((ext_vector_type(4)));
-typedef float float2_ __attribute__((ext_vector_type(2)));
+typedef _Float16 fp16x8 __attribute__((ext_vector_type(8)));
+typedef _Float16 fp16x4 __attribute__((ext_vector_type(4)));
+typedef float fp32x4 __attribute__((ext_vector_type(4)));
+typedef _Float16 fp16;
 
 union RegisterUnion
 {
-  float4_ vector4;
+  fp16x8 vector8;
   struct
   {
-    float2_ vector_front;
-    float2_ vector_rear;
+    fp16x4 vector_front;
+    fp16x4 vector_rear;
   };
 };
 
@@ -126,106 +128,93 @@ gemm_batched_general_kernel(int32_t    M,
 }
 
 
-template <typename inoutT,
-          typename calcT,
-          int  BLK_M,
+template <int  BLK_M,
           int  BLK_N,
           int  BLK_K>
 static __global__ __launch_bounds__(HEP_WARP_SIZE) void
-gemm_batched_kernel(int32_t    M,
+gemm_batched_kernel_mma_fp16_fp32(int32_t    M,
                     int32_t    N,
                     int32_t    K,
-                    inoutT *    dA_input,
+                    _Float16*  dA_input,
                     int32_t    lda,
-                    inoutT *    dB_input,
+                    _Float16*  dB_input,
                     int32_t    ldb,
-                    inoutT *    dC_input,
+                    _Float16*  dC_input,
                     int32_t    ldc)
 {
+    static_assert(BLK_M == 16, "BLK_M must be 16");
+    static_assert(BLK_N == 16, "BLK_N must be 16");
+    static_assert(BLK_K == 16, "BLK_K must be 16");
+    
     int thx  = threadIdx.x;
     int blx  = blockIdx.x;  // block's m position
     int bly  = blockIdx.y;  // block's n position
- 
     __shared__ struct {
-        calcT A[BLK_M][BLK_K]; // shared memory for A
-        calcT B[BLK_K][BLK_N]; // shared memory for B
+        fp16 AB[BLK_M][2][BLK_K]; // shared memory for A, B
     } lds;
 
-    float4_ C_reg_acc00, C_reg_acc01, C_reg_acc10, C_reg_acc11;
-
-    C_reg_acc00 = {0, 0, 0, 0};
-    C_reg_acc01 = {0, 0, 0, 0};
-    C_reg_acc10 = {0, 0, 0, 0};
-    C_reg_acc11 = {0, 0, 0, 0};
+    fp32x4 C_reg_acc = {0, 0, 0, 0};
 
     int kk = 0;
     for(; kk < K; kk += BLK_K)
     {
-        size_t read_dim_mn = (thx * 4) / BLK_K;
-        size_t read_dim_k  = (thx * 4) % BLK_K;
+        size_t read_dim_mn = (thx * 8) / BLK_K;
+        size_t read_dim_k  = (thx * 8) % BLK_K;
         size_t offset_A = size_t(kk * BLK_K + read_dim_k) + size_t(blx * BLK_M + read_dim_mn) * size_t(lda);
         size_t offset_B = size_t(kk * BLK_K + read_dim_k) + size_t(bly * BLK_N + read_dim_mn) * size_t(ldb);
        
-        lds.A[read_dim_mn][read_dim_k + 0] = dA_input[offset_A + 0];
-        lds.A[read_dim_mn][read_dim_k + 1] = dA_input[offset_A + 1];
-        lds.A[read_dim_mn][read_dim_k + 2] = dA_input[offset_A + 2];
-        lds.A[read_dim_mn][read_dim_k + 3] = dA_input[offset_A + 3];
-        lds.B[read_dim_k + 0][read_dim_mn] = dB_input[offset_B + 0];
-        lds.B[read_dim_k + 1][read_dim_mn] = dB_input[offset_B + 1];
-        lds.B[read_dim_k + 2][read_dim_mn] = dB_input[offset_B + 2];
-        lds.B[read_dim_k + 3][read_dim_mn] = dB_input[offset_B + 3];
+        lds.AB[read_dim_mn][0][read_dim_k + 0] = dA_input[offset_A + 0];
+        lds.AB[read_dim_mn][0][read_dim_k + 1] = dA_input[offset_A + 1];
+        lds.AB[read_dim_mn][0][read_dim_k + 2] = dA_input[offset_A + 2];
+        lds.AB[read_dim_mn][0][read_dim_k + 3] = dA_input[offset_A + 3];
+        lds.AB[read_dim_mn][0][read_dim_k + 4] = dA_input[offset_A + 4];
+        lds.AB[read_dim_mn][0][read_dim_k + 5] = dA_input[offset_A + 5];
+        lds.AB[read_dim_mn][0][read_dim_k + 6] = dA_input[offset_A + 6];
+        lds.AB[read_dim_mn][0][read_dim_k + 7] = dA_input[offset_A + 7];
+
+        lds.AB[read_dim_mn + 0][1][read_dim_k] = dB_input[offset_B + 0];
+        lds.AB[read_dim_mn + 1][1][read_dim_k] = dB_input[offset_B + 1];
+        lds.AB[read_dim_mn + 2][1][read_dim_k] = dB_input[offset_B + 2];
+        lds.AB[read_dim_mn + 3][1][read_dim_k] = dB_input[offset_B + 3];
+        lds.AB[read_dim_mn + 4][1][read_dim_k] = dB_input[offset_B + 4];
+        lds.AB[read_dim_mn + 5][1][read_dim_k] = dB_input[offset_B + 5];
+        lds.AB[read_dim_mn + 6][1][read_dim_k] = dB_input[offset_B + 6];
+        lds.AB[read_dim_mn + 7][1][read_dim_k] = dB_input[offset_B + 7];
         asm volatile("s_waitcnt lgkmcnt(0)\n\t");
 
-        RegisterUnion fragA, fragB;
-        float4_ C_res_00, C_res_01, C_res_10, C_res_11;
+        RegisterUnion fragAB;
+        fp32x4 C_reg_res = {0, 0, 0, 0};
+        int lds_read_offset = (thx * 8) * sizeof(_Float16);
 
-        C_res_00 = {0, 0, 0, 0};
-        C_res_01 = {0, 0, 0, 0};
-        C_res_10 = {0, 0, 0, 0};
-        C_res_11 = {0, 0, 0, 0};
-
-        int lds_read_A_offset = (thx * 4) * sizeof(float);
-        int lds_read_B_offset = lds_read_A_offset + sizeof(lds.A);
-        asm volatile("ds_read_m32x8_b32 %0, %1 offset:0\n\t": "+v"(fragA.vector4), "+v"(lds_read_A_offset));
-        asm volatile("ds_read_m32x8_b32 %0, %1 offset:0\n\t": "+v"(fragB.vector4), "+v"(lds_read_B_offset));
-
+        asm volatile("ds_read_m32x16_b16 %0, %1 offset:0\n\t": "+v"(fragAB.vector8), "+v"(lds_read_offset));
         asm volatile("s_waitcnt lgkmcnt(0)\n\t");
+        asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_res), "+v"(fragAB.vector_front), "+v"(fragAB.vector_rear));
 
-        asm volatile("v_mmac_16x16x8_f32 %0, %1, %2, %0\n\t":"+v"(C_res_00), "+v"(fragA.vector_front), "+v"(fragB.vector_front));
-        asm volatile("v_mmac_16x16x8_f32 %0, %1, %2, %0\n\t":"+v"(C_res_01), "+v"(fragA.vector_rear), "+v"(fragB.vector_front));
-        asm volatile("v_mmac_16x16x8_f32 %0, %1, %2, %0\n\t":"+v"(C_res_10), "+v"(fragA.vector_front), "+v"(fragB.vector_rear));
-        asm volatile("v_mmac_16x16x8_f32 %0, %1, %2, %0\n\t":"+v"(C_res_11), "+v"(fragA.vector_rear), "+v"(fragB.vector_rear));
-
-        C_reg_acc00 += C_res_00;
-        C_reg_acc01 += C_res_01;
-        C_reg_acc10 += C_res_10;
-        C_reg_acc11 += C_res_11;
-
+        C_reg_acc += C_reg_res;
     }
     __syncthreads();
 
     size_t output_row = thx % 16;
     size_t output_col = thx / 16;
-    size_t offset_C_row_0 = size_t(bly * BLK_N + output_col) + size_t(blx * BLK_M + output_row) * size_t(ldc);
-    size_t offset_C_row_1 = size_t(bly * BLK_N + output_col) + size_t(blx * BLK_M + output_row + 16) * size_t(ldc);
+    size_t offset_C = size_t(bly * BLK_N + output_col) + size_t(blx * BLK_M + output_row) * size_t(ldc);
 
-    dC_input[offset_C_row_0 +  0] = C_reg_acc00.x;
-    dC_input[offset_C_row_0 +  4] = C_reg_acc00.y;
-    dC_input[offset_C_row_0 +  8] = C_reg_acc00.z;
-    dC_input[offset_C_row_0 + 12] = C_reg_acc00.w;
-    dC_input[offset_C_row_0 + 16] = C_reg_acc10.x;
-    dC_input[offset_C_row_0 + 20] = C_reg_acc10.y;
-    dC_input[offset_C_row_0 + 24] = C_reg_acc10.z;
-    dC_input[offset_C_row_0 + 28] = C_reg_acc10.w;
+    dC_input[offset_C +  0] = (_Float16)C_reg_acc.x;
+    dC_input[offset_C +  4] = (_Float16)C_reg_acc.y;
+    dC_input[offset_C +  8] = (_Float16)C_reg_acc.z;
+    dC_input[offset_C + 12] = (_Float16)C_reg_acc.w;
+    // dC_input[offset_C_row_0 + 16] = C_reg_acc10.x;
+    // dC_input[offset_C_row_0 + 20] = C_reg_acc10.y;
+    // dC_input[offset_C_row_0 + 24] = C_reg_acc10.z;
+    // dC_input[offset_C_row_0 + 28] = C_reg_acc10.w;
 
-    dC_input[offset_C_row_1 +  0] = C_reg_acc01.x;
-    dC_input[offset_C_row_1 +  4] = C_reg_acc01.y;
-    dC_input[offset_C_row_1 +  8] = C_reg_acc01.z;
-    dC_input[offset_C_row_1 + 12] = C_reg_acc01.w;
-    dC_input[offset_C_row_1 + 16] = C_reg_acc11.x;
-    dC_input[offset_C_row_1 + 20] = C_reg_acc11.y;
-    dC_input[offset_C_row_1 + 24] = C_reg_acc11.z;
-    dC_input[offset_C_row_1 + 28] = C_reg_acc11.w;
+    // dC_input[offset_C_row_1 +  0] = C_reg_acc01.x;
+    // dC_input[offset_C_row_1 +  4] = C_reg_acc01.y;
+    // dC_input[offset_C_row_1 +  8] = C_reg_acc01.z;
+    // dC_input[offset_C_row_1 + 12] = C_reg_acc01.w;
+    // dC_input[offset_C_row_1 + 16] = C_reg_acc11.x;
+    // dC_input[offset_C_row_1 + 20] = C_reg_acc11.y;
+    // dC_input[offset_C_row_1 + 24] = C_reg_acc11.z;
+    // dC_input[offset_C_row_1 + 28] = C_reg_acc11.w;
 }
 
 template <typename inoutT, typename calcT>
@@ -246,19 +235,19 @@ static void hep_sgemm(int32_t       m,
 	auto dA = reinterpret_cast<inoutT*>(dA_);
 	auto dB = reinterpret_cast<inoutT*>(dB_);
 	auto dC = reinterpret_cast<inoutT*>(dC_); 
-    if((m % 32 == 0) && (n % 32 == 0) && (k % 8 == 0))
+    if((m % 16 == 0) && (n % 16 == 0) && (k % 16 == 0))
     {
-        // m is mult of 32, n is mult of 32, k is mult of 8
-        const int blk_m = 32;
-        const int blk_n = 32;
-        const int blk_k = 8;
+        // m is mult of 16, n is mult of 16, k is mult of 16
+        const int blk_m = 16;
+        const int blk_n = 16;
+        const int blk_k = 16;
         dim3      dimBlock(HEP_WARP_SIZE);
         dim3      dimGrid(m / blk_m, n / blk_n, 1);
-        gemm_batched_kernel<inoutT, calcT, blk_m, blk_n, blk_k><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
+        gemm_batched_kernel_mma_fp16_fp32<blk_m, blk_n, blk_k><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
     }
     else
     {   
-        exit(-1);
+        std::cout << "General kernel" << std::endl;
         const int dim_m = 16;
         const int dim_n = 16;
         const int blk_m = 32;
