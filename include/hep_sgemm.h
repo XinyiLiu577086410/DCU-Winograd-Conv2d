@@ -202,11 +202,12 @@ gemm_batched_kernel(int32_t    M,
         C_reg_acc11 += C_res_11;
 
     }
+    __syncthreads();
 
     size_t output_row = thx % 16;
     size_t output_col = thx / 16;
-    size_t offset_C_row_0 = size_t(blx * BLK_N) + size_t(blx * BLK_M) * size_t(ldc);
-    size_t offset_C_row_1 = size_t(blx * BLK_N) + size_t(blx * BLK_M + 16) * size_t(ldc);
+    size_t offset_C_row_0 = size_t(bly * BLK_N + output_col) + size_t(blx * BLK_M + output_row) * size_t(ldc);
+    size_t offset_C_row_1 = size_t(bly * BLK_N + output_col) + size_t(blx * BLK_M + output_row + 16) * size_t(ldc);
 
     dC_input[offset_C_row_0 +  0] = C_reg_acc00.x;
     dC_input[offset_C_row_0 +  4] = C_reg_acc00.y;
@@ -245,19 +246,19 @@ static void hep_sgemm(int32_t       m,
 	auto dA = reinterpret_cast<inoutT*>(dA_);
 	auto dB = reinterpret_cast<inoutT*>(dB_);
 	auto dC = reinterpret_cast<inoutT*>(dC_); 
-    // if((m % 32 == 0) && (n % 32 == 0) && (k % 8 == 0))
-    // {
-    //     // m is mult of 32, n is mult of 32, k is mult of 8
-    //     const int blk_m = 32;
-    //     const int blk_n = 32;
-    //     const int blk_k = 8;
-    //     dim3      dimBlock(HEP_WARP_SIZE);
-    //     dim3      dimGrid(m / blk_m, n / blk_n, 1);
-    //     gemm_batched_kernel<inoutT, calcT, blk_m, blk_n, blk_k><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
-    // }
-    // else
+    if((m % 32 == 0) && (n % 32 == 0) && (k % 8 == 0))
+    {
+        // m is mult of 32, n is mult of 32, k is mult of 8
+        const int blk_m = 32;
+        const int blk_n = 32;
+        const int blk_k = 8;
+        dim3      dimBlock(HEP_WARP_SIZE);
+        dim3      dimGrid(m / blk_m, n / blk_n, 1);
+        gemm_batched_kernel<inoutT, calcT, blk_m, blk_n, blk_k><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
+    }
+    else
     {   
-        // exit(-1);
+        exit(-1);
         const int dim_m = 16;
         const int dim_n = 16;
         const int blk_m = 32;
