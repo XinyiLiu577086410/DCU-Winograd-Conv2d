@@ -162,24 +162,24 @@ gemm_batched_kernel_mma_fp16_fp32(int32_t    M,
         size_t read_dim_k  = (thx * 8) % BLK_K;
         size_t offset_A = size_t(kk * BLK_K + read_dim_k) + size_t(blx * BLK_M + read_dim_mn) * size_t(lda);
         size_t offset_B = size_t(kk * BLK_K + read_dim_k) + size_t(bly * BLK_N + read_dim_mn) * size_t(ldb);
-       
-        lds.AB[read_dim_mn][0][read_dim_k + 0] = dA_input[offset_A + 0];
-        lds.AB[read_dim_mn][0][read_dim_k + 1] = dA_input[offset_A + 1];
-        lds.AB[read_dim_mn][0][read_dim_k + 2] = dA_input[offset_A + 2];
-        lds.AB[read_dim_mn][0][read_dim_k + 3] = dA_input[offset_A + 3];
-        lds.AB[read_dim_mn][0][read_dim_k + 4] = dA_input[offset_A + 4];
-        lds.AB[read_dim_mn][0][read_dim_k + 5] = dA_input[offset_A + 5];
-        lds.AB[read_dim_mn][0][read_dim_k + 6] = dA_input[offset_A + 6];
-        lds.AB[read_dim_mn][0][read_dim_k + 7] = dA_input[offset_A + 7];
 
-        lds.AB[read_dim_mn + 0][1][read_dim_k] = dB_input[offset_B + 0];
-        lds.AB[read_dim_mn + 1][1][read_dim_k] = dB_input[offset_B + 1];
-        lds.AB[read_dim_mn + 2][1][read_dim_k] = dB_input[offset_B + 2];
-        lds.AB[read_dim_mn + 3][1][read_dim_k] = dB_input[offset_B + 3];
-        lds.AB[read_dim_mn + 4][1][read_dim_k] = dB_input[offset_B + 4];
-        lds.AB[read_dim_mn + 5][1][read_dim_k] = dB_input[offset_B + 5];
-        lds.AB[read_dim_mn + 6][1][read_dim_k] = dB_input[offset_B + 6];
-        lds.AB[read_dim_mn + 7][1][read_dim_k] = dB_input[offset_B + 7];
+        lds.AB[read_dim_k + 0][0][read_dim_mn] = dA_input[offset_A + 0];
+        lds.AB[read_dim_k + 1][0][read_dim_mn] = dA_input[offset_A + 1];
+        lds.AB[read_dim_k + 2][0][read_dim_mn] = dA_input[offset_A + 2];
+        lds.AB[read_dim_k + 3][0][read_dim_mn] = dA_input[offset_A + 3];
+        lds.AB[read_dim_k + 4][0][read_dim_mn] = dA_input[offset_A + 4];
+        lds.AB[read_dim_k + 5][0][read_dim_mn] = dA_input[offset_A + 5];
+        lds.AB[read_dim_k + 6][0][read_dim_mn] = dA_input[offset_A + 6];
+        lds.AB[read_dim_k + 7][0][read_dim_mn] = dA_input[offset_A + 7];
+
+        lds.AB[read_dim_k + 0][1][read_dim_mn] = dB_input[offset_B + 0];
+        lds.AB[read_dim_k + 1][1][read_dim_mn] = dB_input[offset_B + 1];
+        lds.AB[read_dim_k + 2][1][read_dim_mn] = dB_input[offset_B + 2];
+        lds.AB[read_dim_k + 3][1][read_dim_mn] = dB_input[offset_B + 3];
+        lds.AB[read_dim_k + 4][1][read_dim_mn] = dB_input[offset_B + 4];
+        lds.AB[read_dim_k + 5][1][read_dim_mn] = dB_input[offset_B + 5];
+        lds.AB[read_dim_k + 6][1][read_dim_mn] = dB_input[offset_B + 6];
+        lds.AB[read_dim_k + 7][1][read_dim_mn] = dB_input[offset_B + 7];
         asm volatile("s_waitcnt lgkmcnt(0)\n\t");
 
         RegisterUnion fragAB;
@@ -202,19 +202,7 @@ gemm_batched_kernel_mma_fp16_fp32(int32_t    M,
     dC_input[offset_C +  4] = (_Float16)C_reg_acc.y;
     dC_input[offset_C +  8] = (_Float16)C_reg_acc.z;
     dC_input[offset_C + 12] = (_Float16)C_reg_acc.w;
-    // dC_input[offset_C_row_0 + 16] = C_reg_acc10.x;
-    // dC_input[offset_C_row_0 + 20] = C_reg_acc10.y;
-    // dC_input[offset_C_row_0 + 24] = C_reg_acc10.z;
-    // dC_input[offset_C_row_0 + 28] = C_reg_acc10.w;
 
-    // dC_input[offset_C_row_1 +  0] = C_reg_acc01.x;
-    // dC_input[offset_C_row_1 +  4] = C_reg_acc01.y;
-    // dC_input[offset_C_row_1 +  8] = C_reg_acc01.z;
-    // dC_input[offset_C_row_1 + 12] = C_reg_acc01.w;
-    // dC_input[offset_C_row_1 + 16] = C_reg_acc11.x;
-    // dC_input[offset_C_row_1 + 20] = C_reg_acc11.y;
-    // dC_input[offset_C_row_1 + 24] = C_reg_acc11.z;
-    // dC_input[offset_C_row_1 + 28] = C_reg_acc11.w;
 }
 
 template <typename inoutT, typename calcT>
