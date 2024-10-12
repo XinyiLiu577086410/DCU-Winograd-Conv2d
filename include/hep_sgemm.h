@@ -156,20 +156,20 @@ gemm_batched_kernel_tensorcore_16x16x16_fp16fp32
     int kk = 0;
     for(; kk < K; kk += BLK_K)
     {
-        size_t read_dim_mn = (thx * 4) / BLK_K;
-        size_t read_dim_k  = (thx * 4) % BLK_K;
+        size_t read_dim_k  = thx % BLK_K;
+        size_t read_dim_mn = thx / BLK_K;
         size_t offset_A = size_t(kk + read_dim_k) + size_t(blx * BLK_M + read_dim_mn) * size_t(lda);
         size_t offset_B = size_t(kk + read_dim_k) + size_t(bly * BLK_N + read_dim_mn) * size_t(ldb);
 
-        lds.AB[read_dim_k + 0][0][read_dim_mn] = dA_input[offset_A + 0];
-        lds.AB[read_dim_k + 1][0][read_dim_mn] = dA_input[offset_A + 1];
-        lds.AB[read_dim_k + 2][0][read_dim_mn] = dA_input[offset_A + 2];
-        lds.AB[read_dim_k + 3][0][read_dim_mn] = dA_input[offset_A + 3];
+        lds.AB[read_dim_k][0][read_dim_mn +  0] = dA_input[offset_A +  0 * size_t(lda)];
+        lds.AB[read_dim_k][0][read_dim_mn +  4] = dA_input[offset_A +  4 * size_t(lda)];
+        lds.AB[read_dim_k][0][read_dim_mn +  8] = dA_input[offset_A +  8 * size_t(lda)];
+        lds.AB[read_dim_k][0][read_dim_mn + 12] = dA_input[offset_A + 12 * size_t(lda)];
 
-        lds.AB[read_dim_k + 0][1][read_dim_mn] = dB_input[offset_B + 0];
-        lds.AB[read_dim_k + 1][1][read_dim_mn] = dB_input[offset_B + 1];
-        lds.AB[read_dim_k + 2][1][read_dim_mn] = dB_input[offset_B + 2];
-        lds.AB[read_dim_k + 3][1][read_dim_mn] = dB_input[offset_B + 3];
+        lds.AB[read_dim_k][1][read_dim_mn +  0] = dB_input[offset_B +  0 * size_t(ldb)];
+        lds.AB[read_dim_k][1][read_dim_mn +  4] = dB_input[offset_B +  4 * size_t(ldb)];
+        lds.AB[read_dim_k][1][read_dim_mn +  8] = dB_input[offset_B +  8 * size_t(ldb)];
+        lds.AB[read_dim_k][1][read_dim_mn + 12] = dB_input[offset_B + 12 * size_t(ldb)];
         asm volatile("s_waitcnt lgkmcnt(0)\n\t");
 
         RegisterUnion fragAB;
