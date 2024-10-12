@@ -132,7 +132,8 @@ template <int  BLK_M,
           int  BLK_N,
           int  BLK_K>
 static __global__ __launch_bounds__(HEP_WARP_SIZE) void
-gemm_batched_kernel_mma_fp16_fp32(int32_t    M,
+gemm_batched_kernel_tensorcore_16x16x16_fp16fp32
+                   (int32_t    M,
                     int32_t    N,
                     int32_t    K,
                     _Float16*  dA_input,
@@ -142,10 +143,7 @@ gemm_batched_kernel_mma_fp16_fp32(int32_t    M,
                     _Float16*  dC_input,
                     int32_t    ldc)
 {
-    static_assert(BLK_M == 16, "BLK_M must be 16");
-    static_assert(BLK_N == 16, "BLK_N must be 16");
-    static_assert(BLK_K == 16, "BLK_K must be 16");
-    
+    static_assert(BLK_M == 16 && BLK_N == 16 && BLK_K == 16, "incorrect block shape");
     int thx  = threadIdx.x;
     int blx  = blockIdx.x;  // block's m position
     int bly  = blockIdx.y;  // block's n position
@@ -158,28 +156,20 @@ gemm_batched_kernel_mma_fp16_fp32(int32_t    M,
     int kk = 0;
     for(; kk < K; kk += BLK_K)
     {
-        size_t read_dim_mn = (thx * 8) / BLK_K;
-        size_t read_dim_k  = (thx * 8) % BLK_K;
-        size_t offset_A = size_t(kk * BLK_K + read_dim_k) + size_t(blx * BLK_M + read_dim_mn) * size_t(lda);
-        size_t offset_B = size_t(kk * BLK_K + read_dim_k) + size_t(bly * BLK_N + read_dim_mn) * size_t(ldb);
+        size_t read_dim_mn = (thx * 4) / BLK_K;
+        size_t read_dim_k  = (thx * 4) % BLK_K;
+        size_t offset_A = size_t(kk + read_dim_k) + size_t(blx * BLK_M + read_dim_mn) * size_t(lda);
+        size_t offset_B = size_t(kk + read_dim_k) + size_t(bly * BLK_N + read_dim_mn) * size_t(ldb);
 
         lds.AB[read_dim_k + 0][0][read_dim_mn] = dA_input[offset_A + 0];
         lds.AB[read_dim_k + 1][0][read_dim_mn] = dA_input[offset_A + 1];
         lds.AB[read_dim_k + 2][0][read_dim_mn] = dA_input[offset_A + 2];
         lds.AB[read_dim_k + 3][0][read_dim_mn] = dA_input[offset_A + 3];
-        lds.AB[read_dim_k + 4][0][read_dim_mn] = dA_input[offset_A + 4];
-        lds.AB[read_dim_k + 5][0][read_dim_mn] = dA_input[offset_A + 5];
-        lds.AB[read_dim_k + 6][0][read_dim_mn] = dA_input[offset_A + 6];
-        lds.AB[read_dim_k + 7][0][read_dim_mn] = dA_input[offset_A + 7];
 
         lds.AB[read_dim_k + 0][1][read_dim_mn] = dB_input[offset_B + 0];
         lds.AB[read_dim_k + 1][1][read_dim_mn] = dB_input[offset_B + 1];
         lds.AB[read_dim_k + 2][1][read_dim_mn] = dB_input[offset_B + 2];
         lds.AB[read_dim_k + 3][1][read_dim_mn] = dB_input[offset_B + 3];
-        lds.AB[read_dim_k + 4][1][read_dim_mn] = dB_input[offset_B + 4];
-        lds.AB[read_dim_k + 5][1][read_dim_mn] = dB_input[offset_B + 5];
-        lds.AB[read_dim_k + 6][1][read_dim_mn] = dB_input[offset_B + 6];
-        lds.AB[read_dim_k + 7][1][read_dim_mn] = dB_input[offset_B + 7];
         asm volatile("s_waitcnt lgkmcnt(0)\n\t");
 
         RegisterUnion fragAB;
@@ -196,13 +186,12 @@ gemm_batched_kernel_mma_fp16_fp32(int32_t    M,
 
     size_t output_row = thx % 16;
     size_t output_col = thx / 16;
-    size_t offset_C = size_t(bly * BLK_N + output_col) + size_t(blx * BLK_M + output_row) * size_t(ldc);
+    size_t offset_C = size_t(bly * BLK_N + output_col) * size_t(ldc) + size_t(blx * BLK_M + output_row);
 
-    dC_input[offset_C +  0] = (_Float16)C_reg_acc.x;
-    dC_input[offset_C +  4] = (_Float16)C_reg_acc.y;
-    dC_input[offset_C +  8] = (_Float16)C_reg_acc.z;
-    dC_input[offset_C + 12] = (_Float16)C_reg_acc.w;
-
+    dC_input[offset_C +  0 * size_t(ldc)] = (_Float16)C_reg_acc.x;
+    dC_input[offset_C +  4 * size_t(ldc)] = (_Float16)C_reg_acc.y;
+    dC_input[offset_C +  8 * size_t(ldc)] = (_Float16)C_reg_acc.z;
+    dC_input[offset_C + 12 * size_t(ldc)] = (_Float16)C_reg_acc.w;
 }
 
 template <typename inoutT, typename calcT>
@@ -231,7 +220,7 @@ static void hep_sgemm(int32_t       m,
         const int blk_k = 16;
         dim3      dimBlock(HEP_WARP_SIZE);
         dim3      dimGrid(m / blk_m, n / blk_n, 1);
-        gemm_batched_kernel_mma_fp16_fp32<blk_m, blk_n, blk_k><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
+        gemm_batched_kernel_tensorcore_16x16x16_fp16fp32<blk_m, blk_n, blk_k><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
     }
     else
     {   
