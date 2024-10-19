@@ -128,6 +128,112 @@ gemm_batched_general_kernel(int32_t    M,
 }
 
 
+
+
+template <int  BLK_M,
+          int  BLK_N,
+          int  BLK_K>
+static __global__ __launch_bounds__(HEP_WARP_SIZE) void
+gemm_batched_kernel_tensorcore_32x32x16_fp16fp32
+                   (int32_t    M,
+                    int32_t    N,
+                    int32_t    K,
+                    _Float16*  dA_input,
+                    int32_t    lda,
+                    _Float16*  dB_input,
+                    int32_t    ldb,
+                    _Float16*  dC_input,
+                    int32_t    ldc)
+{
+    static_assert(BLK_M == 32 && BLK_N == 32 && BLK_K == 16, "incorrect block shape");
+    int thx  = threadIdx.x;
+    int blx  = blockIdx.x;  // block's m position
+    int bly  = blockIdx.y;  // block's n position
+    __shared__ struct {
+        fp16 AB[BLK_K][2][BLK_M]; // shared memory for A, B
+    } lds;
+
+    fp32x4 C_reg_acc[4] = {{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}};
+
+    int kk = 0;
+    for(; kk < K; kk += BLK_K)
+    {
+        size_t read_dim_k  = thx % BLK_K;
+        size_t read_dim_mn = thx / BLK_K;
+        size_t offset_A = size_t(kk + read_dim_k) + size_t(blx * BLK_M + read_dim_mn) * size_t(lda);
+        size_t offset_B = size_t(kk + read_dim_k) + size_t(bly * BLK_N + read_dim_mn) * size_t(ldb);
+
+        lds.AB[read_dim_k][0][read_dim_mn +  0] = dA_input[offset_A +  0 * size_t(lda)];
+        lds.AB[read_dim_k][0][read_dim_mn +  4] = dA_input[offset_A +  4 * size_t(lda)];
+        lds.AB[read_dim_k][0][read_dim_mn +  8] = dA_input[offset_A +  8 * size_t(lda)];
+        lds.AB[read_dim_k][0][read_dim_mn + 12] = dA_input[offset_A + 12 * size_t(lda)];
+        lds.AB[read_dim_k][0][read_dim_mn + 16] = dA_input[offset_A + 16 * size_t(lda)];
+        lds.AB[read_dim_k][0][read_dim_mn + 20] = dA_input[offset_A + 20 * size_t(lda)];
+        lds.AB[read_dim_k][0][read_dim_mn + 24] = dA_input[offset_A + 24 * size_t(lda)];
+        lds.AB[read_dim_k][0][read_dim_mn + 28] = dA_input[offset_A + 28 * size_t(lda)];
+
+        lds.AB[read_dim_k][1][read_dim_mn +  0] = dB_input[offset_B +  0 * size_t(ldb)];
+        lds.AB[read_dim_k][1][read_dim_mn +  4] = dB_input[offset_B +  4 * size_t(ldb)];
+        lds.AB[read_dim_k][1][read_dim_mn +  8] = dB_input[offset_B +  8 * size_t(ldb)];
+        lds.AB[read_dim_k][1][read_dim_mn + 12] = dB_input[offset_B + 12 * size_t(ldb)];
+        lds.AB[read_dim_k][1][read_dim_mn + 16] = dB_input[offset_B + 16 * size_t(ldb)];
+        lds.AB[read_dim_k][1][read_dim_mn + 20] = dB_input[offset_B + 20 * size_t(ldb)];
+        lds.AB[read_dim_k][1][read_dim_mn + 24] = dB_input[offset_B + 24 * size_t(ldb)];
+        lds.AB[read_dim_k][1][read_dim_mn + 28] = dB_input[offset_B + 28 * size_t(ldb)];
+
+
+        asm volatile("s_waitcnt lgkmcnt(0)\n\t");
+
+        RegisterUnion fragAB, fragAB2;
+        
+        read_dim_mn = thx % BLK_K;
+        read_dim_k  = thx / BLK_K * 4;
+
+        fragAB.vector_front = {lds.AB[read_dim_k + 0][0][read_dim_mn], lds.AB[read_dim_k + 1][0][read_dim_mn], lds.AB[read_dim_k + 2][0][read_dim_mn], lds.AB[read_dim_k + 3][0][read_dim_mn]};
+        fragAB.vector_rear  = {lds.AB[read_dim_k + 0][1][read_dim_mn], lds.AB[read_dim_k + 1][1][read_dim_mn], lds.AB[read_dim_k + 2][1][read_dim_mn], lds.AB[read_dim_k + 3][1][read_dim_mn]};
+        fragAB2.vector_front = {lds.AB[read_dim_k + 0][0][read_dim_mn + 16], lds.AB[read_dim_k + 1][0][read_dim_mn + 16], lds.AB[read_dim_k + 2][0][read_dim_mn + 16], lds.AB[read_dim_k + 3][0][read_dim_mn + 16]};
+        fragAB2.vector_rear  = {lds.AB[read_dim_k + 0][1][read_dim_mn + 16], lds.AB[read_dim_k + 1][1][read_dim_mn + 16], lds.AB[read_dim_k + 2][1][read_dim_mn + 16], lds.AB[read_dim_k + 3][1][read_dim_mn + 16]};
+        __syncthreads();
+
+        asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[0]), "+v"(fragAB.vector_front), "+v"(fragAB.vector_rear));
+        asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[1]), "+v"(fragAB.vector_front), "+v"(fragAB2.vector_rear));
+        asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[2]), "+v"(fragAB2.vector_front), "+v"(fragAB.vector_rear));
+        asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[3]), "+v"(fragAB2.vector_front), "+v"(fragAB2.vector_rear));
+
+    }
+    __syncthreads();
+
+    size_t output_row = thx % 16;
+    size_t output_col = thx / 16;
+    size_t offset_C = size_t(bly * BLK_N + output_col) * size_t(ldc) + size_t(blx * BLK_M + output_row);
+
+    size_t offset_C0 = size_t(bly * BLK_N + output_col +  0) * size_t(ldc) + size_t(blx * BLK_M + output_row +  0);
+    size_t offset_C1 = size_t(bly * BLK_N + output_col + 16) * size_t(ldc) + size_t(blx * BLK_M + output_row +  0);
+    size_t offset_C2 = size_t(bly * BLK_N + output_col +  0) * size_t(ldc) + size_t(blx * BLK_M + output_row + 16);
+    size_t offset_C3 = size_t(bly * BLK_N + output_col + 16) * size_t(ldc) + size_t(blx * BLK_M + output_row + 16);
+
+    dC_input[offset_C0 +  0 * size_t(ldc)] = (_Float16)C_reg_acc[0].x;
+    dC_input[offset_C0 +  4 * size_t(ldc)] = (_Float16)C_reg_acc[0].y;
+    dC_input[offset_C0 +  8 * size_t(ldc)] = (_Float16)C_reg_acc[0].z;
+    dC_input[offset_C0 + 12 * size_t(ldc)] = (_Float16)C_reg_acc[0].w;
+
+    dC_input[offset_C1 +  0 * size_t(ldc)] = (_Float16)C_reg_acc[1].x;
+    dC_input[offset_C1 +  4 * size_t(ldc)] = (_Float16)C_reg_acc[1].y;
+    dC_input[offset_C1 +  8 * size_t(ldc)] = (_Float16)C_reg_acc[1].z;
+    dC_input[offset_C1 + 12 * size_t(ldc)] = (_Float16)C_reg_acc[1].w;
+
+    dC_input[offset_C2 +  0 * size_t(ldc)] = (_Float16)C_reg_acc[2].x;
+    dC_input[offset_C2 +  4 * size_t(ldc)] = (_Float16)C_reg_acc[2].y;
+    dC_input[offset_C2 +  8 * size_t(ldc)] = (_Float16)C_reg_acc[2].z;
+    dC_input[offset_C2 + 12 * size_t(ldc)] = (_Float16)C_reg_acc[2].w;
+
+    dC_input[offset_C3 +  0 * size_t(ldc)] = (_Float16)C_reg_acc[3].x;
+    dC_input[offset_C3 +  4 * size_t(ldc)] = (_Float16)C_reg_acc[3].y;
+    dC_input[offset_C3 +  8 * size_t(ldc)] = (_Float16)C_reg_acc[3].z;
+    dC_input[offset_C3 + 12 * size_t(ldc)] = (_Float16)C_reg_acc[3].w;
+}
+
+
 template <int  BLK_M,
           int  BLK_N,
           int  BLK_K>
@@ -182,7 +288,6 @@ gemm_batched_kernel_tensorcore_16x16x16_fp16fp32
         fragAB.vector_rear  = {lds.AB[read_dim_k + 0][1][read_dim_mn], lds.AB[read_dim_k + 1][1][read_dim_mn], lds.AB[read_dim_k + 2][1][read_dim_mn], lds.AB[read_dim_k + 3][1][read_dim_mn]};
 
         __syncthreads();
-
         // asm volatile("ds_read_m32x16_b16 %0, %1 offset:0\n\t": "+v"(fragAB.vector8), "+v"(lds_read_offset));
         asm volatile("s_waitcnt lgkmcnt(0)\n\t");
         asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc), "+v"(fragAB.vector_front), "+v"(fragAB.vector_rear));
@@ -219,7 +324,16 @@ static void hep_sgemm(int32_t       m,
 	auto dA = reinterpret_cast<inoutT*>(dA_);
 	auto dB = reinterpret_cast<inoutT*>(dB_);
 	auto dC = reinterpret_cast<inoutT*>(dC_); 
-    if((m % 16 == 0) && (n % 16 == 0) && (k % 16 == 0))
+    if((m % 32 == 0) && (n % 32 == 0) && (k % 16 == 0))
+    {
+        const int blk_m = 32;
+        const int blk_n = 32;
+        const int blk_k = 16;
+        dim3      dimBlock(HEP_WARP_SIZE);
+        dim3      dimGrid(m / blk_m, n / blk_n, 1);
+        gemm_batched_kernel_tensorcore_32x32x16_fp16fp32<blk_m, blk_n, blk_k><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
+    }
+    else if((m % 16 == 0) && (n % 16 == 0) && (k % 16 == 0))
     {
         // m is mult of 16, n is mult of 16, k is mult of 16
         const int blk_m = 16;
