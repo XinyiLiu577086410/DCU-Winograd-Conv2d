@@ -176,11 +176,18 @@ gemm_batched_kernel_tensorcore_16x16x16_fp16fp32
         fp32x4 C_reg_res = {0, 0, 0, 0};
         int lds_read_offset = (thx * 8) * sizeof(_Float16);
 
-        asm volatile("ds_read_m32x16_b16 %0, %1 offset:0\n\t": "+v"(fragAB.vector8), "+v"(lds_read_offset));
-        asm volatile("s_waitcnt lgkmcnt(0)\n\t");
-        asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_res), "+v"(fragAB.vector_front), "+v"(fragAB.vector_rear));
+        read_dim_mn = thx % BLK_M;
+        read_dim_k  = thx / BLK_M * 4;
+        fragAB.vector_front = {lds.AB[read_dim_k + 0][0][read_dim_mn], lds.AB[read_dim_k + 1][0][read_dim_mn], lds.AB[read_dim_k + 2][0][read_dim_mn], lds.AB[read_dim_k + 3][0][read_dim_mn]};
+        fragAB.vector_rear  = {lds.AB[read_dim_k + 0][1][read_dim_mn], lds.AB[read_dim_k + 1][1][read_dim_mn], lds.AB[read_dim_k + 2][1][read_dim_mn], lds.AB[read_dim_k + 3][1][read_dim_mn]};
 
-        C_reg_acc += C_reg_res;
+        __syncthreads();
+
+        // asm volatile("ds_read_m32x16_b16 %0, %1 offset:0\n\t": "+v"(fragAB.vector8), "+v"(lds_read_offset));
+        asm volatile("s_waitcnt lgkmcnt(0)\n\t");
+        asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc), "+v"(fragAB.vector_front), "+v"(fragAB.vector_rear));
+
+        // C_reg_acc += C_reg_res;
     }
     __syncthreads();
 
