@@ -150,7 +150,8 @@ gemm_batched_kernel_tensorcore_32x32x16_fp16fp32
     int blx  = blockIdx.x;  // block's m position
     int bly  = blockIdx.y;  // block's n position
     __shared__ struct {
-        fp16 AB[BLK_K][2][BLK_M]; // shared memory for A, B
+        fp16 A[BLK_K][BLK_M]; // shared memory for A, B
+        fp16 B[BLK_K][BLK_N];
     } lds;
 
     fp32x4 C_reg_acc[4] = {{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}};
@@ -163,24 +164,23 @@ gemm_batched_kernel_tensorcore_32x32x16_fp16fp32
         size_t offset_A = size_t(kk + read_dim_k) + size_t(blx * BLK_M + read_dim_mn) * size_t(lda);
         size_t offset_B = size_t(kk + read_dim_k) + size_t(bly * BLK_N + read_dim_mn) * size_t(ldb);
 
-        lds.AB[read_dim_k][0][read_dim_mn +  0] = dA_input[offset_A +  0 * size_t(lda)];
-        lds.AB[read_dim_k][0][read_dim_mn +  4] = dA_input[offset_A +  4 * size_t(lda)];
-        lds.AB[read_dim_k][0][read_dim_mn +  8] = dA_input[offset_A +  8 * size_t(lda)];
-        lds.AB[read_dim_k][0][read_dim_mn + 12] = dA_input[offset_A + 12 * size_t(lda)];
-        lds.AB[read_dim_k][0][read_dim_mn + 16] = dA_input[offset_A + 16 * size_t(lda)];
-        lds.AB[read_dim_k][0][read_dim_mn + 20] = dA_input[offset_A + 20 * size_t(lda)];
-        lds.AB[read_dim_k][0][read_dim_mn + 24] = dA_input[offset_A + 24 * size_t(lda)];
-        lds.AB[read_dim_k][0][read_dim_mn + 28] = dA_input[offset_A + 28 * size_t(lda)];
+        lds.A[read_dim_k][read_dim_mn +  0] = dA_input[offset_A +  0 * size_t(lda)];
+        lds.A[read_dim_k][read_dim_mn +  4] = dA_input[offset_A +  4 * size_t(lda)];
+        lds.A[read_dim_k][read_dim_mn +  8] = dA_input[offset_A +  8 * size_t(lda)];
+        lds.A[read_dim_k][read_dim_mn + 12] = dA_input[offset_A + 12 * size_t(lda)];
+        lds.A[read_dim_k][read_dim_mn + 16] = dA_input[offset_A + 16 * size_t(lda)];
+        lds.A[read_dim_k][read_dim_mn + 20] = dA_input[offset_A + 20 * size_t(lda)];
+        lds.A[read_dim_k][read_dim_mn + 24] = dA_input[offset_A + 24 * size_t(lda)];
+        lds.A[read_dim_k][read_dim_mn + 28] = dA_input[offset_A + 28 * size_t(lda)];
 
-        lds.AB[read_dim_k][1][read_dim_mn +  0] = dB_input[offset_B +  0 * size_t(ldb)];
-        lds.AB[read_dim_k][1][read_dim_mn +  4] = dB_input[offset_B +  4 * size_t(ldb)];
-        lds.AB[read_dim_k][1][read_dim_mn +  8] = dB_input[offset_B +  8 * size_t(ldb)];
-        lds.AB[read_dim_k][1][read_dim_mn + 12] = dB_input[offset_B + 12 * size_t(ldb)];
-        lds.AB[read_dim_k][1][read_dim_mn + 16] = dB_input[offset_B + 16 * size_t(ldb)];
-        lds.AB[read_dim_k][1][read_dim_mn + 20] = dB_input[offset_B + 20 * size_t(ldb)];
-        lds.AB[read_dim_k][1][read_dim_mn + 24] = dB_input[offset_B + 24 * size_t(ldb)];
-        lds.AB[read_dim_k][1][read_dim_mn + 28] = dB_input[offset_B + 28 * size_t(ldb)];
-
+        lds.B[read_dim_k][read_dim_mn +  0] = dB_input[offset_B +  0 * size_t(ldb)];
+        lds.B[read_dim_k][read_dim_mn +  4] = dB_input[offset_B +  4 * size_t(ldb)];
+        lds.B[read_dim_k][read_dim_mn +  8] = dB_input[offset_B +  8 * size_t(ldb)];
+        lds.B[read_dim_k][read_dim_mn + 12] = dB_input[offset_B + 12 * size_t(ldb)];
+        lds.B[read_dim_k][read_dim_mn + 16] = dB_input[offset_B + 16 * size_t(ldb)];
+        lds.B[read_dim_k][read_dim_mn + 20] = dB_input[offset_B + 20 * size_t(ldb)];
+        lds.B[read_dim_k][read_dim_mn + 24] = dB_input[offset_B + 24 * size_t(ldb)];
+        lds.B[read_dim_k][read_dim_mn + 28] = dB_input[offset_B + 28 * size_t(ldb)];
 
         asm volatile("s_waitcnt lgkmcnt(0)\n\t");
 
@@ -189,10 +189,10 @@ gemm_batched_kernel_tensorcore_32x32x16_fp16fp32
         read_dim_mn = thx % BLK_K;
         read_dim_k  = thx / BLK_K * 4;
 
-        fragAB.vector_front = {lds.AB[read_dim_k + 0][0][read_dim_mn], lds.AB[read_dim_k + 1][0][read_dim_mn], lds.AB[read_dim_k + 2][0][read_dim_mn], lds.AB[read_dim_k + 3][0][read_dim_mn]};
-        fragAB.vector_rear  = {lds.AB[read_dim_k + 0][1][read_dim_mn], lds.AB[read_dim_k + 1][1][read_dim_mn], lds.AB[read_dim_k + 2][1][read_dim_mn], lds.AB[read_dim_k + 3][1][read_dim_mn]};
-        fragAB2.vector_front = {lds.AB[read_dim_k + 0][0][read_dim_mn + 16], lds.AB[read_dim_k + 1][0][read_dim_mn + 16], lds.AB[read_dim_k + 2][0][read_dim_mn + 16], lds.AB[read_dim_k + 3][0][read_dim_mn + 16]};
-        fragAB2.vector_rear  = {lds.AB[read_dim_k + 0][1][read_dim_mn + 16], lds.AB[read_dim_k + 1][1][read_dim_mn + 16], lds.AB[read_dim_k + 2][1][read_dim_mn + 16], lds.AB[read_dim_k + 3][1][read_dim_mn + 16]};
+        fragAB.vector_front = {lds.A[read_dim_k + 0][read_dim_mn], lds.A[read_dim_k + 1][read_dim_mn], lds.A[read_dim_k + 2][read_dim_mn], lds.A[read_dim_k + 3][read_dim_mn]};
+        fragAB.vector_rear  = {lds.B[read_dim_k + 0][read_dim_mn], lds.B[read_dim_k + 1][read_dim_mn], lds.B[read_dim_k + 2][read_dim_mn], lds.B[read_dim_k + 3][read_dim_mn]};
+        fragAB2.vector_front = {lds.A[read_dim_k + 0][read_dim_mn + 16], lds.A[read_dim_k + 1][read_dim_mn + 16], lds.A[read_dim_k + 2][read_dim_mn + 16], lds.A[read_dim_k + 3][read_dim_mn + 16]};
+        fragAB2.vector_rear  = {lds.B[read_dim_k + 0][read_dim_mn + 16], lds.B[read_dim_k + 1][read_dim_mn + 16], lds.B[read_dim_k + 2][read_dim_mn + 16], lds.B[read_dim_k + 3][read_dim_mn + 16]};
         __syncthreads();
 
         asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[0]), "+v"(fragAB.vector_front), "+v"(fragAB.vector_rear));
