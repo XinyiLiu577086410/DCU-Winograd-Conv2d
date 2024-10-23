@@ -401,25 +401,17 @@ extern "C" void winconv_4x3(const void* param_ptr) {
     HIP_CHECK_KERNEL("Kernel panic!!!");    
 
     const float alpha = 1.0, beta = 0.0;
-    for(int i = 0; i < TILE_IN_H * TILE_IN_W; ++i) {
-        typedef const _Float16 (*UTensor_t) [TILE_IN_W][     us.oc     ][us.ic];
-        typedef _Float16 (*VTensor_t) [TILE_IN_W][vs.numTileTotal][vs.ic];
-        typedef _Float16 (*MTensor_t) [TILE_IN_W][us.oc][vs.numTileTotal];
-        UTensor_t UTensor = (UTensor_t) U_d;
-        VTensor_t VTensor = (VTensor_t) V_d;
-        MTensor_t MTensor = (MTensor_t) M_d;
-        hep_sgemm<_Float16, float>(vs.numTileTotal, us.oc, us.ic,
-                              alpha,
-                              (void*)(VTensor[i/TILE_IN_W][i%TILE_IN_W]),
-                              vs.ic, 
-                              (void*)(UTensor[i/TILE_IN_W][i%TILE_IN_W]),
-                              us.ic, 
-                              beta, 
-                              (void*)(MTensor[i/TILE_IN_W][i%TILE_IN_W]),
-                              vs.numTileTotal,
-                              1,
-                              hipStreamDefault);
-    }
+    hep_sgemm<_Float16, float>(vs.numTileTotal, us.oc, us.ic,
+                          alpha,
+                          (void*)(V_d),
+                          vs.ic, 
+                          (void*)(U_d),
+                          us.ic, 
+                          beta, 
+                          (void*)(M_d),
+                          vs.numTileTotal,
+                          TILE_IN_H * TILE_IN_W,
+                          hipStreamDefault);
 
     destTransformStore<_Float16, _Float16><<<16384, BLOCK_DIM>>>(M_d, us.oc * vs.numTileTotal, out_d, os, ts);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
