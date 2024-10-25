@@ -279,6 +279,91 @@ void filter_transform_2_dims( _Float16* __restrict__ filter_,
 }
 
 template <typename inoutT, 
+          typename calcT, 
+          int work_group_size>
+__global__ void filterTransform(_Float16* __restrict__ filter, 
+                                void*     __restrict__ U_,
+                                UShape                 us, 
+                                int                    simdDimSize) 
+{
+  auto U = reinterpret_cast<inoutT*>(U_);
+  __shared__ calcT tmp[work_group_size][TILE_IN_H][TILE_IN_W] ;
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int itx = threadIdx.x;
+  calcT z0, z1, z2, z3, z4, z5, z6;
+  while (idx < simdDimSize) {
+    int oc = idx / us.ic;
+    int ic = idx % us.ic;
+    int store_idx = ic * us.oc + oc;
+    for (int i = 0; i < FLT_HW; ++i) {
+      z6 = filter[idx * FLT_H * FLT_W + 0 * FLT_W  + i];
+
+      z0 = ((calcT)( 1.0f / 4.0f )) * z6;
+      z1 = ((calcT)(-1.0f / 6.0f )) * z6;
+      z2 = ((calcT)(-1.0f / 6.0f )) * z6;
+      z3 = ((calcT)( 1.0f / 24.0f)) * z6;
+      z4 = ((calcT)( 1.0f / 24.0f)) * z6;
+
+      z6 = filter[idx * FLT_H * FLT_W + 1 * FLT_W  + i];
+
+      z1 += ((calcT)(-1.0f / 6.0f )) * z6;
+      z2 += ((calcT)( 1.0f / 6.0f )) * z6;
+      z3 += ((calcT)( 1.0f / 12.0f)) * z6;
+      z4 += ((calcT)(-1.0f / 12.0f)) * z6;
+
+      z6 = filter[idx * FLT_H * FLT_W + 2 * FLT_W  + i];
+
+      z1 += ((calcT)(-1.0f / 6.0f)) * z6;
+      z2 += ((calcT)(-1.0f / 6.0f)) * z6;
+      z3 += ((calcT)( 1.0f / 6.0f)) * z6;
+      z4 += ((calcT)( 1.0f / 6.0f)) * z6;
+      z5 = z6;
+
+      tmp[itx][0][i] = z0;
+      tmp[itx][1][i] = z1;
+      tmp[itx][2][i] = z2;
+      tmp[itx][3][i] = z3;
+      tmp[itx][4][i] = z4;
+      tmp[itx][5][i] = z5;
+    }
+
+    for (int i = 0; i < TILE_IN_H; ++i) {
+      z6 = tmp[itx][i][0];
+
+      z0 = ((calcT)( 1.0f / 4.0f )) * z6;
+      z1 = ((calcT)(-1.0f / 6.0f )) * z6;
+      z2 = ((calcT)(-1.0f / 6.0f )) * z6;
+      z3 = ((calcT)( 1.0f / 24.0f)) * z6;
+      z4 = ((calcT)( 1.0f / 24.0f)) * z6;
+
+      z6 = tmp[itx][i][1];
+
+      z1 += ((calcT)(-1.0f / 6.0f )) * z6;
+      z2 += ((calcT)( 1.0f / 6.0f )) * z6;
+      z3 += ((calcT)( 1.0f / 12.0f)) * z6;
+      z4 += ((calcT)(-1.0f / 12.0f)) * z6;
+
+      z6 = tmp[itx][i][2];
+
+      z1 += ((calcT)(-1.0f / 6.0f)) * z6;
+      z2 += ((calcT)(-1.0f / 6.0f)) * z6;
+      z3 += ((calcT)( 1.0f / 6.0f)) * z6;
+      z4 += ((calcT)( 1.0f / 6.0f)) * z6;
+      z5 = z6;
+
+      U[i * TILE_IN_W * simdDimSize + 0 * simdDimSize + store_idx] = z0;
+      U[i * TILE_IN_W * simdDimSize + 1 * simdDimSize + store_idx] = z1;
+      U[i * TILE_IN_W * simdDimSize + 2 * simdDimSize + store_idx] = z2;
+      U[i * TILE_IN_W * simdDimSize + 3 * simdDimSize + store_idx] = z3;
+      U[i * TILE_IN_W * simdDimSize + 4 * simdDimSize + store_idx] = z4;
+      U[i * TILE_IN_W * simdDimSize + 5 * simdDimSize + store_idx] = z5;
+    }
+    idx += blockDim.x * gridDim.x;
+  }
+}
+
+
+template <typename inoutT, 
           typename calcT,
           int work_group_size>
 __global__ void destTransformStore(void* __restrict__    M_, 
@@ -422,8 +507,35 @@ extern "C" void winconv_4x3(const void* param_ptr) {
     dim3 block_dim(blk_ic, blk_oc);
     dim3 grid_dim(DIV_UP(us.ic , blk_ic), DIV_UP(us.oc, blk_oc));
     filter_transform_2_dims <_Float16, _Float16, blk_ic, blk_oc> <<< grid_dim, block_dim >>> (filter_d, U_d, us);
+    fp16* U_ref_d;
+    size_t U_size = sizeof(fp16) * us.oc * us.ic * TILE_IN_H * TILE_IN_W;
+    hipMalloc(&U_ref_d, U_size);
+    filterTransform <_Float16, _Float16, work_group_size> <<< us.ic * us.oc / work_group_size, work_group_size >>> (filter_d, U_ref_d, us, us.ic * us.oc);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
-
+    fp16 * U_ref_h = (fp16*)malloc(U_size), * U_h = (fp16*)malloc(U_size);
+    hipMemcpy(U_ref_h, U_ref_d, U_size, hipMemcpyDeviceToHost);
+    hipMemcpy(U_h, U_d, U_size, hipMemcpyDeviceToHost);
+    for(int i = 0; i < us.oc * us.ic * TILE_IN_H * TILE_IN_W; ++i) {
+      printf("%f ", (float)U_ref_h[i]);
+    }
+    printf("\n");
+    for(int i = 0; i < us.oc * us.ic * TILE_IN_H * TILE_IN_W; ++i) {
+      printf("%f ", (float)U_h[i]);
+    }
+    printf("\n");
+    for(int i = 0; i < us.oc * us.ic * TILE_IN_H * TILE_IN_W; ++i) {
+      auto x = (float)U_h[i];
+      auto ref = (float)U_ref_h[i];
+      if(fabs((x - ref) / ref) > 0.1) {
+        int h = i / (6 * us.ic * us.oc);
+        int res = i % (6 * us.ic * us.oc);
+        int w = res / (us.ic * us.oc);
+        res = res % (us.ic * us.oc);
+        int ic = res / us.oc;
+        int oc = res % us.oc; 
+        printf("i = %d, \(h,w,ic.oc\) = \(%d,%d,%d,%d\), x = %f, ref = %f\n", i, h, w, ic, oc, x, ref);
+      }
+    }
     const float alpha = 1.0, beta = 0.0;
     hep_sgemm<_Float16, float>( vs.numTileTotal, us.oc, us.ic,
                                 alpha,
