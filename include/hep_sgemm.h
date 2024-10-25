@@ -153,63 +153,84 @@ gemm_batched_kernel_tensorcore_32x32x16_fp16fp32
     dA_input += size_t(blz) * M * K;
     dB_input += size_t(blz) * N * K;
     dC_input += size_t(blz) * N * M;
-    __shared__ struct {
-        fp16 A[BLK_K][BLK_M / 2 + 1][2]; // shared memory for A, B
-        fp16 B[BLK_K][BLK_N / 2 + 1][2];
-    } lds;
+    // __shared__ struct {
+    //     fp16 A[BLK_K][BLK_M / 2 + 1][2]; // shared memory for A, B
+    //     fp16 B[BLK_K][BLK_N / 2 + 1][2];
+    // } lds;
 
     fp32x4 C_reg_acc[4] = {{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}};
 
     int kk = 0;
     for(; kk < K; kk += BLK_K)
     {
-        size_t read_dim_k  = thx % BLK_K;
-        size_t read_dim_mn = thx / BLK_K;
-        size_t offset_A = size_t(kk + read_dim_k) + size_t(blx * BLK_M + read_dim_mn) * size_t(lda);
-        size_t offset_B = size_t(kk + read_dim_k) + size_t(bly * BLK_N + read_dim_mn) * size_t(ldb);
+        // size_t read_dim_k  = thx % BLK_K;
+        // size_t read_dim_mn = thx / BLK_K;
+        // size_t offset_A = size_t(kk + read_dim_k) + size_t(blx * BLK_M + read_dim_mn) * size_t(lda);
+        // size_t offset_B = size_t(kk + read_dim_k) + size_t(bly * BLK_N + read_dim_mn) * size_t(ldb);
         
-        lds.A[read_dim_k][(read_dim_mn +  0) % (BLK_M / 2)][(read_dim_mn +  0) / (BLK_M / 2)] = dA_input[offset_A +  0 * size_t(lda)];
-        lds.A[read_dim_k][(read_dim_mn +  4) % (BLK_M / 2)][(read_dim_mn +  4) / (BLK_M / 2)] = dA_input[offset_A +  4 * size_t(lda)];
-        lds.A[read_dim_k][(read_dim_mn +  8) % (BLK_M / 2)][(read_dim_mn +  8) / (BLK_M / 2)] = dA_input[offset_A +  8 * size_t(lda)];
-        lds.A[read_dim_k][(read_dim_mn + 12) % (BLK_M / 2)][(read_dim_mn + 12) / (BLK_M / 2)] = dA_input[offset_A + 12 * size_t(lda)];
-        lds.A[read_dim_k][(read_dim_mn + 16) % (BLK_M / 2)][(read_dim_mn + 16) / (BLK_M / 2)] = dA_input[offset_A + 16 * size_t(lda)];
-        lds.A[read_dim_k][(read_dim_mn + 20) % (BLK_M / 2)][(read_dim_mn + 20) / (BLK_M / 2)] = dA_input[offset_A + 20 * size_t(lda)];
-        lds.A[read_dim_k][(read_dim_mn + 24) % (BLK_M / 2)][(read_dim_mn + 24) / (BLK_M / 2)] = dA_input[offset_A + 24 * size_t(lda)];
-        lds.A[read_dim_k][(read_dim_mn + 28) % (BLK_M / 2)][(read_dim_mn + 28) / (BLK_M / 2)] = dA_input[offset_A + 28 * size_t(lda)];
+        // lds.A[read_dim_k][(read_dim_mn +  0) % (BLK_M / 2)][(read_dim_mn +  0) / (BLK_M / 2)] = dA_input[offset_A +  0 * size_t(lda)];
+        // lds.A[read_dim_k][(read_dim_mn +  4) % (BLK_M / 2)][(read_dim_mn +  4) / (BLK_M / 2)] = dA_input[offset_A +  4 * size_t(lda)];
+        // lds.A[read_dim_k][(read_dim_mn +  8) % (BLK_M / 2)][(read_dim_mn +  8) / (BLK_M / 2)] = dA_input[offset_A +  8 * size_t(lda)];
+        // lds.A[read_dim_k][(read_dim_mn + 12) % (BLK_M / 2)][(read_dim_mn + 12) / (BLK_M / 2)] = dA_input[offset_A + 12 * size_t(lda)];
+        // lds.A[read_dim_k][(read_dim_mn + 16) % (BLK_M / 2)][(read_dim_mn + 16) / (BLK_M / 2)] = dA_input[offset_A + 16 * size_t(lda)];
+        // lds.A[read_dim_k][(read_dim_mn + 20) % (BLK_M / 2)][(read_dim_mn + 20) / (BLK_M / 2)] = dA_input[offset_A + 20 * size_t(lda)];
+        // lds.A[read_dim_k][(read_dim_mn + 24) % (BLK_M / 2)][(read_dim_mn + 24) / (BLK_M / 2)] = dA_input[offset_A + 24 * size_t(lda)];
+        // lds.A[read_dim_k][(read_dim_mn + 28) % (BLK_M / 2)][(read_dim_mn + 28) / (BLK_M / 2)] = dA_input[offset_A + 28 * size_t(lda)];
 
-        lds.B[read_dim_k][(read_dim_mn +  0) % (BLK_N / 2)][(read_dim_mn +  0) / (BLK_N / 2)] = dB_input[offset_B +  0 * size_t(ldb)];
-        lds.B[read_dim_k][(read_dim_mn +  4) % (BLK_N / 2)][(read_dim_mn +  4) / (BLK_N / 2)] = dB_input[offset_B +  4 * size_t(ldb)];
-        lds.B[read_dim_k][(read_dim_mn +  8) % (BLK_N / 2)][(read_dim_mn +  8) / (BLK_N / 2)] = dB_input[offset_B +  8 * size_t(ldb)];
-        lds.B[read_dim_k][(read_dim_mn + 12) % (BLK_N / 2)][(read_dim_mn + 12) / (BLK_N / 2)] = dB_input[offset_B + 12 * size_t(ldb)];
-        lds.B[read_dim_k][(read_dim_mn + 16) % (BLK_N / 2)][(read_dim_mn + 16) / (BLK_N / 2)] = dB_input[offset_B + 16 * size_t(ldb)];
-        lds.B[read_dim_k][(read_dim_mn + 20) % (BLK_N / 2)][(read_dim_mn + 20) / (BLK_N / 2)] = dB_input[offset_B + 20 * size_t(ldb)];
-        lds.B[read_dim_k][(read_dim_mn + 24) % (BLK_N / 2)][(read_dim_mn + 24) / (BLK_N / 2)] = dB_input[offset_B + 24 * size_t(ldb)];
-        lds.B[read_dim_k][(read_dim_mn + 28) % (BLK_N / 2)][(read_dim_mn + 28) / (BLK_N / 2)] = dB_input[offset_B + 28 * size_t(ldb)];
-
-        asm volatile("s_waitcnt lgkmcnt(0)\n\t");
+        // lds.B[read_dim_k][(read_dim_mn +  0) % (BLK_N / 2)][(read_dim_mn +  0) / (BLK_N / 2)] = dB_input[offset_B +  0 * size_t(ldb)];
+        // lds.B[read_dim_k][(read_dim_mn +  4) % (BLK_N / 2)][(read_dim_mn +  4) / (BLK_N / 2)] = dB_input[offset_B +  4 * size_t(ldb)];
+        // lds.B[read_dim_k][(read_dim_mn +  8) % (BLK_N / 2)][(read_dim_mn +  8) / (BLK_N / 2)] = dB_input[offset_B +  8 * size_t(ldb)];
+        // lds.B[read_dim_k][(read_dim_mn + 12) % (BLK_N / 2)][(read_dim_mn + 12) / (BLK_N / 2)] = dB_input[offset_B + 12 * size_t(ldb)];
+        // lds.B[read_dim_k][(read_dim_mn + 16) % (BLK_N / 2)][(read_dim_mn + 16) / (BLK_N / 2)] = dB_input[offset_B + 16 * size_t(ldb)];
+        // lds.B[read_dim_k][(read_dim_mn + 20) % (BLK_N / 2)][(read_dim_mn + 20) / (BLK_N / 2)] = dB_input[offset_B + 20 * size_t(ldb)];
+        // lds.B[read_dim_k][(read_dim_mn + 24) % (BLK_N / 2)][(read_dim_mn + 24) / (BLK_N / 2)] = dB_input[offset_B + 24 * size_t(ldb)];
+        // lds.B[read_dim_k][(read_dim_mn + 28) % (BLK_N / 2)][(read_dim_mn + 28) / (BLK_N / 2)] = dB_input[offset_B + 28 * size_t(ldb)];
 
         RegisterUnion fragAB, fragAB2;
         
-        read_dim_mn = thx % BLK_K;
-        read_dim_k  = thx / BLK_K * 4;
+        size_t read_dim_mn = thx % BLK_K;
+        size_t read_dim_k  = thx / BLK_K * 4;
+        // size_t read_dim_k  = thx % BLK_K;
+        // size_t read_dim_mn = thx / BLK_K;
+        size_t offset_A = size_t(kk + read_dim_k) * size_t(lda) + size_t(blx * BLK_M + read_dim_mn);
+        size_t offset_B = size_t(kk + read_dim_k) * size_t(ldb) + size_t(bly * BLK_N + read_dim_mn);
 
-        fragAB.vector_front  = {lds.A[read_dim_k + 0][read_dim_mn % (BLK_M / 2)][read_dim_mn / (BLK_M / 2)], 
-                                lds.A[read_dim_k + 1][read_dim_mn % (BLK_M / 2)][read_dim_mn / (BLK_M / 2)], 
-                                lds.A[read_dim_k + 2][read_dim_mn % (BLK_M / 2)][read_dim_mn / (BLK_M / 2)], 
-                                lds.A[read_dim_k + 3][read_dim_mn % (BLK_M / 2)][read_dim_mn / (BLK_M / 2)]};
-        fragAB.vector_rear   = {lds.B[read_dim_k + 0][read_dim_mn % (BLK_N / 2)][read_dim_mn / (BLK_N / 2)], 
-                                lds.B[read_dim_k + 1][read_dim_mn % (BLK_N / 2)][read_dim_mn / (BLK_N / 2)],
-                                lds.B[read_dim_k + 2][read_dim_mn % (BLK_N / 2)][read_dim_mn / (BLK_N / 2)], 
-                                lds.B[read_dim_k + 3][read_dim_mn % (BLK_N / 2)][read_dim_mn / (BLK_N / 2)]};
-        fragAB2.vector_front = {lds.A[read_dim_k + 0][(read_dim_mn + 16) % (BLK_M / 2)][(read_dim_mn + 16) / (BLK_M / 2)], 
-                                lds.A[read_dim_k + 1][(read_dim_mn + 16) % (BLK_M / 2)][(read_dim_mn + 16) / (BLK_M / 2)], 
-                                lds.A[read_dim_k + 2][(read_dim_mn + 16) % (BLK_M / 2)][(read_dim_mn + 16) / (BLK_M / 2)],
-                                lds.A[read_dim_k + 3][(read_dim_mn + 16) % (BLK_M / 2)][(read_dim_mn + 16) / (BLK_M / 2)]};
-        fragAB2.vector_rear  = {lds.B[read_dim_k + 0][(read_dim_mn + 16) % (BLK_N / 2)][(read_dim_mn + 16) / (BLK_N / 2)],
-                                lds.B[read_dim_k + 1][(read_dim_mn + 16) % (BLK_N / 2)][(read_dim_mn + 16) / (BLK_N / 2)], 
-                                lds.B[read_dim_k + 2][(read_dim_mn + 16) % (BLK_N / 2)][(read_dim_mn + 16) / (BLK_N / 2)], 
-                                lds.B[read_dim_k + 3][(read_dim_mn + 16) % (BLK_N / 2)][(read_dim_mn + 16) / (BLK_N / 2)]};
-        __syncthreads();
+        // fragAB.vector_front  = {lds.A[read_dim_k + 0][read_dim_mn % (BLK_M / 2)][read_dim_mn / (BLK_M / 2)], 
+        //                         lds.A[read_dim_k + 1][read_dim_mn % (BLK_M / 2)][read_dim_mn / (BLK_M / 2)], 
+        //                         lds.A[read_dim_k + 2][read_dim_mn % (BLK_M / 2)][read_dim_mn / (BLK_M / 2)], 
+        //                         lds.A[read_dim_k + 3][read_dim_mn % (BLK_M / 2)][read_dim_mn / (BLK_M / 2)]};
+        // fragAB.vector_rear   = {lds.B[read_dim_k + 0][read_dim_mn % (BLK_N / 2)][read_dim_mn / (BLK_N / 2)], 
+        //                         lds.B[read_dim_k + 1][read_dim_mn % (BLK_N / 2)][read_dim_mn / (BLK_N / 2)],
+        //                         lds.B[read_dim_k + 2][read_dim_mn % (BLK_N / 2)][read_dim_mn / (BLK_N / 2)], 
+        //                         lds.B[read_dim_k + 3][read_dim_mn % (BLK_N / 2)][read_dim_mn / (BLK_N / 2)]};
+        // fragAB2.vector_front = {lds.A[read_dim_k + 0][(read_dim_mn + 16) % (BLK_M / 2)][(read_dim_mn + 16) / (BLK_M / 2)], 
+        //                         lds.A[read_dim_k + 1][(read_dim_mn + 16) % (BLK_M / 2)][(read_dim_mn + 16) / (BLK_M / 2)], 
+        //                         lds.A[read_dim_k + 2][(read_dim_mn + 16) % (BLK_M / 2)][(read_dim_mn + 16) / (BLK_M / 2)],
+        //                         lds.A[read_dim_k + 3][(read_dim_mn + 16) % (BLK_M / 2)][(read_dim_mn + 16) / (BLK_M / 2)]};
+        // fragAB2.vector_rear  = {lds.B[read_dim_k + 0][(read_dim_mn + 16) % (BLK_N / 2)][(read_dim_mn + 16) / (BLK_N / 2)],
+        //                         lds.B[read_dim_k + 1][(read_dim_mn + 16) % (BLK_N / 2)][(read_dim_mn + 16) / (BLK_N / 2)], 
+        //                         lds.B[read_dim_k + 2][(read_dim_mn + 16) % (BLK_N / 2)][(read_dim_mn + 16) / (BLK_N / 2)], 
+        //                         lds.B[read_dim_k + 3][(read_dim_mn + 16) % (BLK_N / 2)][(read_dim_mn + 16) / (BLK_N / 2)]};
+        fragAB.vector_front = { dA_input[offset_A + 0 * size_t(lda)],
+                                dA_input[offset_A + 1 * size_t(lda)],
+                                dA_input[offset_A + 2 * size_t(lda)],
+                                dA_input[offset_A + 3 * size_t(lda)] };
+        fragAB.vector_rear  = { dB_input[offset_B + 0 * size_t(ldb)],
+                                dB_input[offset_B + 1 * size_t(ldb)],
+                                dB_input[offset_B + 2 * size_t(ldb)],
+                                dB_input[offset_B + 3 * size_t(ldb)] };
+        offset_A += 16;
+        offset_B += 16;
+        fragAB2.vector_front = { dA_input[offset_A + 0 * size_t(lda)],
+                                 dA_input[offset_A + 1 * size_t(lda)],
+                                 dA_input[offset_A + 2 * size_t(lda)],
+                                 dA_input[offset_A + 3 * size_t(lda)] };
+        fragAB2.vector_rear  = { dB_input[offset_B + 0 * size_t(ldb)],
+                                 dB_input[offset_B + 1 * size_t(ldb)],
+                                 dB_input[offset_B + 2 * size_t(ldb)],
+                                 dB_input[offset_B + 3 * size_t(ldb)] };
+
+        asm volatile("s_waitcnt lgkmcnt(0)\n\t");
 
         asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[0]), "+v"(fragAB.vector_front), "+v"(fragAB.vector_rear));
         asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[1]), "+v"(fragAB.vector_front), "+v"(fragAB2.vector_rear));
