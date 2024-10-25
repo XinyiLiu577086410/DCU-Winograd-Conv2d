@@ -181,7 +181,7 @@ template <typename inoutT,
           typename calcT , 
           int      IC_BLK,
           int      OC_BLK>
-__launch_bounds__(OC_BLK * IC_BLK) __global__ 
+__global__ __launch_bounds__(OC_BLK * IC_BLK)  
 void filter_transform_2_dims( _Float16* __restrict__ filter_, 
                               void*     __restrict__ U_,
                               UShape                 us ) 
@@ -198,7 +198,8 @@ void filter_transform_2_dims( _Float16* __restrict__ filter_,
 
   for(int w = 0; w < FLT_W; ++w)
     for(int h = 0; h < FLT_H; ++h)
-      tmp[ic_local][oc_local][h][w] = filter[oc_blk * OC_BLK + oc_local][ic_blk * IC_BLK + ic_local][h][w];
+      if(oc_blk * OC_BLK + oc_local < us.oc && ic_blk * IC_BLK + ic_local < us.ic)
+        tmp[ic_local][oc_local][h][w] = filter[oc_blk * OC_BLK + oc_local][ic_blk * IC_BLK + ic_local][h][w];
   
   __syncthreads();
   
@@ -272,7 +273,8 @@ void filter_transform_2_dims( _Float16* __restrict__ filter_,
   // const int oc_local_store = threadIdx.x;
   for(int w = 0; w < TILE_IN_W; ++w)
     for(int h = 0; h < TILE_IN_H; ++h)
-      U[h][w][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = tmp[ic_local][oc_local][h][w];
+        if(oc_blk * OC_BLK + oc_local < us.oc && ic_blk * IC_BLK + ic_local < us.ic)
+          U[h][w][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = tmp[ic_local][oc_local][h][w];
 
 }
 
@@ -418,7 +420,7 @@ extern "C" void winconv_4x3(const void* param_ptr) {
     const int blk_oc = 16;
     const int blk_ic = 16;
     dim3 block_dim(blk_ic, blk_oc);
-    dim3 grid_dim(us.ic / blk_ic, us.oc / blk_oc);
+    dim3 grid_dim(DIV_UP(us.ic , blk_ic), DIV_UP(us.oc, blk_oc));
     filter_transform_2_dims <_Float16, _Float16, blk_ic, blk_oc> <<< grid_dim, block_dim >>> (filter_d, U_d, us);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
 
