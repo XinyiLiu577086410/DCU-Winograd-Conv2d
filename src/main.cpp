@@ -104,7 +104,7 @@ int main(int argc, char**argv)
     hipEventRecord(start,0);
     float time_elapsed=0.0;
     
-    int iternum = 0;
+    int iternum = 100;
     for(int i=0; i<iternum; i++)
     {
         winconv_4x3(param);

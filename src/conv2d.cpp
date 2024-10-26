@@ -190,6 +190,7 @@ void filter_transform_2_dims( _Float16* __restrict__ filter_,
   auto filter = reinterpret_cast<inoutT(*)[us.ic][FLT_H][FLT_W]>(filter_);
   auto U = reinterpret_cast<inoutT(*)[TILE_IN_W][us.ic][us.oc]>(U_);
   __shared__ calcT tmp[IC_BLK][OC_BLK][TILE_IN_H][TILE_IN_W];
+  // __shared__ calcT tmp2[IC_BLK][OC_BLK][TILE_IN_H][TILE_IN_W];
   const int oc_local = threadIdx.y;  // thread's index on OC
   const int ic_local = threadIdx.x;  // thread's index on IC
   const int oc_blk   = blockIdx.y;   // workgroup's index on OC
@@ -259,22 +260,30 @@ void filter_transform_2_dims( _Float16* __restrict__ filter_,
     z4 += ((calcT)( 1.0f / 6.0f)) * z6;
     z5 = z6;
 
-    tmp[ic_local][oc_local][h][0] = z0;
-    tmp[ic_local][oc_local][h][1] = z1;
-    tmp[ic_local][oc_local][h][2] = z2;
-    tmp[ic_local][oc_local][h][3] = z3;
-    tmp[ic_local][oc_local][h][4] = z4;
-    tmp[ic_local][oc_local][h][5] = z5;
+    // tmp[ic_local][oc_local][h][0] = z0;
+    // tmp[ic_local][oc_local][h][1] = z1;
+    // tmp[ic_local][oc_local][h][2] = z2;
+    // tmp[ic_local][oc_local][h][3] = z3;
+    // tmp[ic_local][oc_local][h][4] = z4;
+    // tmp[ic_local][oc_local][h][5] = z5;
+    if(oc_blk * OC_BLK + oc_local < us.oc && ic_blk * IC_BLK + ic_local < us.ic) {
+      U[h][0][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z0;
+      U[h][1][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z1;
+      U[h][2][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z2;
+      U[h][3][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z3;
+      U[h][4][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z4;
+      U[h][5][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z5;
+    }
   }
 
   __syncthreads();
   
   // const int ic_local_store = threadIdx.y;
   // const int oc_local_store = threadIdx.x;
-  for(int w = 0; w < TILE_IN_W; ++w)
-    for(int h = 0; h < TILE_IN_H; ++h)
-        if(oc_blk * OC_BLK + oc_local < us.oc && ic_blk * IC_BLK + ic_local < us.ic)
-          U[h][w][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = tmp[ic_local][oc_local][h][w];
+  // for(int w = 0; w < TILE_IN_W; ++w)
+  //   for(int h = 0; h < TILE_IN_H; ++h)
+  //       if(oc_blk * OC_BLK + oc_local < us.oc && ic_blk * IC_BLK + ic_local < us.ic)
+  //         U[h][w][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = tmp[ic_local][oc_local][h][w];
 
 }
 
@@ -507,35 +516,36 @@ extern "C" void winconv_4x3(const void* param_ptr) {
     dim3 block_dim(blk_ic, blk_oc);
     dim3 grid_dim(DIV_UP(us.ic , blk_ic), DIV_UP(us.oc, blk_oc));
     filter_transform_2_dims <_Float16, _Float16, blk_ic, blk_oc> <<< grid_dim, block_dim >>> (filter_d, U_d, us);
-    fp16* U_ref_d;
-    size_t U_size = sizeof(fp16) * us.oc * us.ic * TILE_IN_H * TILE_IN_W;
-    hipMalloc(&U_ref_d, U_size);
-    filterTransform <_Float16, _Float16, work_group_size> <<< us.ic * us.oc / work_group_size, work_group_size >>> (filter_d, U_ref_d, us, us.ic * us.oc);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
-    fp16 * U_ref_h = (fp16*)malloc(U_size), * U_h = (fp16*)malloc(U_size);
-    hipMemcpy(U_ref_h, U_ref_d, U_size, hipMemcpyDeviceToHost);
-    hipMemcpy(U_h, U_d, U_size, hipMemcpyDeviceToHost);
-    for(int i = 0; i < us.oc * us.ic * TILE_IN_H * TILE_IN_W; ++i) {
-      printf("%f ", (float)U_ref_h[i]);
-    }
-    printf("\n");
-    for(int i = 0; i < us.oc * us.ic * TILE_IN_H * TILE_IN_W; ++i) {
-      printf("%f ", (float)U_h[i]);
-    }
-    printf("\n");
-    for(int i = 0; i < us.oc * us.ic * TILE_IN_H * TILE_IN_W; ++i) {
-      auto x = (float)U_h[i];
-      auto ref = (float)U_ref_h[i];
-      if(fabs((x - ref) / ref) > 0.1) {
-        int h = i / (6 * us.ic * us.oc);
-        int res = i % (6 * us.ic * us.oc);
-        int w = res / (us.ic * us.oc);
-        res = res % (us.ic * us.oc);
-        int ic = res / us.oc;
-        int oc = res % us.oc; 
-        printf("i = %d, \(h,w,ic.oc\) = \(%d,%d,%d,%d\), x = %f, ref = %f\n", i, h, w, ic, oc, x, ref);
-      }
-    }
+    // fp16* U_ref_d;
+    // size_t U_size = sizeof(fp16) * us.oc * us.ic * TILE_IN_H * TILE_IN_W;
+    // hipMalloc(&U_ref_d, U_size);
+    // filterTransform <_Float16, _Float16, work_group_size> <<< us.ic * us.oc / work_group_size, work_group_size >>> (filter_d, U_ref_d, us, us.ic * us.oc);
+    // HIP_CHECK_KERNEL("Kernel panic!!!");    
+    // fp16 * U_ref_h = (fp16*)malloc(U_size), * U_h = (fp16*)malloc(U_size);
+    // hipMemcpy(U_ref_h, U_ref_d, U_size, hipMemcpyDeviceToHost);
+    // hipMemcpy(U_h, U_d, U_size, hipMemcpyDeviceToHost);
+    // for(int i = 0; i < us.oc * us.ic * TILE_IN_H * TILE_IN_W; ++i) {
+    //   printf("%f ", (float)U_ref_h[i]);
+    // }
+    // printf("\n");
+    // for(int i = 0; i < us.oc * us.ic * TILE_IN_H * TILE_IN_W; ++i) {
+    //   printf("%f ", (float)U_h[i]);
+    // }
+    // printf("\n");
+    // for(int i = 0; i < us.oc * us.ic * TILE_IN_H * TILE_IN_W; ++i) {
+    //   auto x = (float)U_h[i];
+    //   auto ref = (float)U_ref_h[i];
+    //   if(fabs((x - ref) / ref) > 0.1) {
+    //     int h = i / (6 * us.ic * us.oc);
+    //     int res = i % (6 * us.ic * us.oc);
+    //     int w = res / (us.ic * us.oc);
+    //     res = res % (us.ic * us.oc);
+    //     int ic = res / us.oc;
+    //     int oc = res % us.oc; 
+    //     printf("i = %d, \(h,w,ic.oc\) = \(%d,%d,%d,%d\), x = %f, ref = %f\n", i, h, w, ic, oc, x, ref);
+    //   }
+    // }
     const float alpha = 1.0, beta = 0.0;
     hep_sgemm<_Float16, float>( vs.numTileTotal, us.oc, us.ic,
                                 alpha,
