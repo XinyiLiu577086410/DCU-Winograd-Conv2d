@@ -455,19 +455,10 @@ static void hep_sgemm(int32_t       m,
         dim3      dimGrid(m / blk_m, n / blk_n, batch_count);
         gemm_batched_kernel_tensorcore_32x32x16_fp16fp32<blk_m, blk_n, blk_k><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
     }
-    else
+    else if((m % 16 == 0) && (n % 16 == 0) && (k % 16 == 0))
     {
-        const int blk_m = 32;
-        const int blk_n = 32;
-        const int blk_k = 16;
-        dim3      dimBlock(HEP_WARP_SIZE);
-        dim3      dimGrid((m - 1) / blk_m + 1, (n - 1) / blk_n + 1, batch_count);
-        gemm_batched_general_kernel_tensorcore_32x32x16_fp16fp32<blk_m, blk_n, blk_k><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
-    }
-    // else if((m % 16 == 0) && (n % 16 == 0) && (k % 16 == 0))
-    // {
-        // std::cout << "this kernel not implemented!!!" << std::endl;
-        // std::exit(-1);
+        std::cout << "this kernel not implemented!!!" << std::endl;
+        std::exit(-1);
         // m is mult of 16, n is mult of 16, k is mult of 16
         // const int blk_m = 16;
         // const int blk_n = 16;
@@ -475,18 +466,14 @@ static void hep_sgemm(int32_t       m,
         // dim3      dimBlock(HEP_WARP_SIZE);
         // dim3      dimGrid(m / blk_m, n / blk_n, 1);
         // gemm_batched_kernel_tensorcore_16x16x16_fp16fp32<blk_m, blk_n, blk_k><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
-    // }
-    // else
-    // {   
-        // std::cout << "General kernel not implemented!!!" << std::endl;
-        // std::exit(-1);
-        // const int dim_m = 16;
-        // const int dim_n = 16;
-        // const int blk_m = 32;
-        // const int blk_n = 32;
-        // const int blk_k = 8;
-        // dim3      dimBlock(dim_m, dim_n, 1);
-        // dim3      dimGrid(((m - 1) / blk_m) + 1, ((n - 1) / blk_n) + 1, batch_count_unused);
-        // gemm_batched_general_kernel<inoutT, calcT, dim_m, dim_n, blk_m, blk_n, blk_k, blk_m, blk_k, blk_k, blk_n><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, alpha, dA, lda, dB, ldb, beta, dC, ldc, batch_count_unused);
-    // }
+    }
+    else
+    {   
+        const int blk_m = 32;
+        const int blk_n = 32;
+        const int blk_k = 16;
+        dim3      dimBlock(HEP_WARP_SIZE);
+        dim3      dimGrid((m - 1) / blk_m + 1, (n - 1) / blk_n + 1, batch_count);
+        gemm_batched_general_kernel_tensorcore_32x32x16_fp16fp32<blk_m, blk_n, blk_k><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
+    }
 }
