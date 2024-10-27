@@ -182,7 +182,7 @@ template <typename inoutT,
           int      IC_BLK,
           int      OC_BLK>
 __global__ __launch_bounds__(OC_BLK * IC_BLK)  
-void filter_transform_2_dims( _Float16* __restrict__ filter_, 
+void filter_transform_2_dims_transpose( _Float16* __restrict__ filter_, 
                               void*     __restrict__ U_,
                               UShape                 us ) 
 {
@@ -276,7 +276,7 @@ void filter_transform_2_dims( _Float16* __restrict__ filter_,
 template <typename inoutT, 
           typename calcT, 
           int work_group_size>
-__global__ void filter_transform(_Float16* __restrict__ filter, 
+__global__ void filter_transform_no_transpose(_Float16* __restrict__ filter, 
                                 void*     __restrict__ U_,
                                 UShape                 us, 
                                 int                    simdDimSize) 
@@ -287,9 +287,6 @@ __global__ void filter_transform(_Float16* __restrict__ filter,
   int itx = threadIdx.x;
   calcT z0, z1, z2, z3, z4, z5, z6;
   while (idx < simdDimSize) {
-    int oc = idx / us.ic;
-    int ic = idx % us.ic;
-    int store_idx = ic * us.oc + oc;
     for (int i = 0; i < FLT_HW; ++i) {
       z6 = filter[idx * FLT_H * FLT_W + 0 * FLT_W  + i];
 
@@ -346,12 +343,12 @@ __global__ void filter_transform(_Float16* __restrict__ filter,
       z4 += ((calcT)( 1.0f / 6.0f)) * z6;
       z5 = z6;
 
-      U[i * TILE_IN_W * simdDimSize + 0 * simdDimSize + store_idx] = z0;
-      U[i * TILE_IN_W * simdDimSize + 1 * simdDimSize + store_idx] = z1;
-      U[i * TILE_IN_W * simdDimSize + 2 * simdDimSize + store_idx] = z2;
-      U[i * TILE_IN_W * simdDimSize + 3 * simdDimSize + store_idx] = z3;
-      U[i * TILE_IN_W * simdDimSize + 4 * simdDimSize + store_idx] = z4;
-      U[i * TILE_IN_W * simdDimSize + 5 * simdDimSize + store_idx] = z5;
+      U[i * TILE_IN_W * simdDimSize + 0 * simdDimSize + idx] = z0;
+      U[i * TILE_IN_W * simdDimSize + 1 * simdDimSize + idx] = z1;
+      U[i * TILE_IN_W * simdDimSize + 2 * simdDimSize + idx] = z2;
+      U[i * TILE_IN_W * simdDimSize + 3 * simdDimSize + idx] = z3;
+      U[i * TILE_IN_W * simdDimSize + 4 * simdDimSize + idx] = z4;
+      U[i * TILE_IN_W * simdDimSize + 5 * simdDimSize + idx] = z5;
     }
     idx += blockDim.x * gridDim.x;
   }
@@ -501,7 +498,7 @@ extern "C" void winconv_4x3(const void* param_ptr) {
     const int blk_ic = 16;
     dim3 block_dim(blk_ic, blk_oc);
     dim3 grid_dim(DIV_UP(us.ic , blk_ic), DIV_UP(us.oc, blk_oc));
-    filter_transform_2_dims <_Float16, _Float16, blk_ic, blk_oc> <<< grid_dim, block_dim >>> (filter_d, U_d, us);
+    filter_transform_no_transpose <_Float16, _Float16, work_group_size> <<<us.ic * us.oc / work_group_size, work_group_size>>> (filter_d, U_d, us, us.ic * us.oc);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
     const float alpha = 1.0, beta = 0.0;
     hep_sgemm<_Float16, float>( vs.numTileTotal, us.oc, us.ic,
@@ -546,7 +543,6 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
     unsigned int p = problem->p;
     unsigned int q = problem->q;
 
-    // printf("n:%d, c:%d, h:%d, w:%d, k:%d, r:%d, s:%d, u:%d, v:%d, p:%d, q:%d\n", n, c, h, w, k, r, s, u, v, p, q);
 
     unsigned int outh = (h - r + 2*p)/u + 1;
     unsigned int outw = (w - s + 2*q)/v + 1;
@@ -590,13 +586,20 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
     unsigned int U_size = TILE_IN_H * TILE_IN_W * k * c;
     unsigned int V_size = TILE_IN_H * TILE_IN_W * vs.numTileTotal * c;
     unsigned int M_size = TILE_IN_H  * TILE_IN_W  * k * vs.numTileTotal;
-    unsigned int Y_size = TILE_OUT_H * TILE_IN_W  * k * vs.numTileTotal;
-
+#ifdef PRINT_TENSOR_SIZE
+    std::cout << "n = " << n << ", c = " << c << ", h = " << h << ", w = " << w << ", k = " << k << ", r = " << r << ", s = " << s << ", u = " << u << ", v = " << v << ", p = " << p << ", q = " << q << std::endl;
+    std::cout << "image_size: " << image_size / 1024.0 << " KiB" << std::endl;
+    std::cout << "filter_size: " << filter_size / 1024.0 << " KiB" << std::endl;
+    std::cout << "out_size: " << out_size / 1024.0 << " KiB" << std::endl;
+    std::cout << "U_size: " << U_size / 1024.0 << " KiB" << std::endl;
+    std::cout << "V_size: " << V_size / 1024.0 << " KiB" << std::endl;
+    std::cout << "M_size: " << M_size / 1024.0 << " KiB" << std::endl;
+    std::exit(0);
+#endif
     unsigned int malloc_size = sizeof(_Float16) * (
           U_size
         + V_size
         + M_size
-        + Y_size
     );
     
     hipMalloc(&pArgs->U_d, malloc_size);

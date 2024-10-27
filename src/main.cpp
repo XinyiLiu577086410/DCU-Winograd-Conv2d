@@ -34,10 +34,6 @@ int main(int argc, char**argv)
     hipMalloc((void**)&pWeight_device, k*c*r*s*sizeof(_Float16));
     hipMalloc((void**)&pOut_device, n*k*outh*outw*sizeof(_Float16));
     
-    // printf("pIn_device size %ld GiB\n", n*c*h*w*sizeof(_Float16) / 1024 / 1024);
-    // printf("pWeight_device size %ld GiB\n", k*c*r*s*sizeof(_Float16) / 1024 / 1024);
-    // printf("pOut_device size %ld GiB\n", n*k*outh*outw*sizeof(_Float16) / 1024 / 1024);
-    // printf("n:%d, c:%d, h:%d, w:%d, k:%d, r:%d, s:%d, u:%d, v:%d, p:%d, q:%d\n", n, c, h, w, k, r, s, u, v, p, q);
 
     for(int i = 0; i < n*c*h*w; i++)
     {
