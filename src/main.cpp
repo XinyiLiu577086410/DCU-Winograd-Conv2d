@@ -125,7 +125,7 @@ int main(int argc, char**argv)
     for(int i=0;i<n*k*outh*outw;i++)
     {
         float device_out = pOut_host[i];
-        if((fabs(pOut_host[i] - pOut[i]))/pOut_host[i] > 0.01|| isnan(device_out) || isinf(device_out))
+        if((fabs(pOut_host[i] - pOut[i])) / pOut[i] > 0.01|| isnan(device_out) || isinf(device_out))
         {
             printf("error, postion:%d, gpuvalue:%f, cpuvalue:%f\n", i, (float)pOut_host[i], (float)pOut[i]);
             break;

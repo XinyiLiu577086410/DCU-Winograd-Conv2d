@@ -1,5 +1,6 @@
 #include <hip/hip_runtime.h>
 #include <cstdint>
+#include <iostream>
 #define HEP_WARP_SIZE 64
 
 typedef _Float16 fp16;
@@ -33,10 +34,10 @@ gemm_batched_general_kernel_tensorcore_32x32x16_fp16fp32_Akxm_Bnxk_Cnxm
                     int32_t    ldc)
 {
     static_assert(BLK_M == 32 && BLK_N == 32 && BLK_K == 16, "incorrect block shape");
-    int thx  = threadIdx.x;
-    int blx  = blockIdx.x;  // block's m position
-    int bly  = blockIdx.y;  // block's n position
-    int blz  = blockIdx.z;  // block's matrix in the batch 
+    const int thx  = threadIdx.x;
+    const int blx  = blockIdx.x;  // block's m position
+    const int bly  = blockIdx.y;  // block's n position
+    const int blz  = blockIdx.z;  // block's matrix in the batch 
     dA_input += size_t(blz) * M * K;
     dB_input += size_t(blz) * N * K;
     dC_input += size_t(blz) * N * M;
@@ -54,7 +55,7 @@ gemm_batched_general_kernel_tensorcore_32x32x16_fp16fp32_Akxm_Bnxk_Cnxm
         size_t read_dim_k  = thx % BLK_K;
         size_t read_dim_mn = thx / BLK_K;
         size_t offset_B = size_t(kk + read_dim_k) + size_t(bly * BLK_N + read_dim_mn) * size_t(ldb);
-        int flag_if_read_B[2][4] = {0};
+        int flag_if_read_B[2][4] = {{0, 0, 0, 0}, {0, 0, 0, 0}};
         for(int i = 0; i < 4; i++)
         {
             flag_if_read_B[0][i] = (kk + read_dim_k < K && bly * BLK_N + read_dim_mn + i * 4 < N);
@@ -71,10 +72,10 @@ gemm_batched_general_kernel_tensorcore_32x32x16_fp16fp32_Akxm_Bnxk_Cnxm
 
 
 
-        read_dim_mn = thx % BLK_K;
+        read_dim_mn = thx % BLK_K;  // shall be (BLK_MN / 2) not BLK_K
         read_dim_k  = thx / BLK_K * 4;
         size_t offset_A = size_t(kk + read_dim_k) * size_t(lda) + size_t(blx * BLK_M + read_dim_mn);
-        int flag_if_read_A[2][4] = {0};
+        int flag_if_read_A[2][4] = {{0, 0, 0, 0}, {0, 0, 0, 0}};
         for(int i = 0; i < 4; i++)
         {
             flag_if_read_A[0][i] = (kk + read_dim_k + i < K && blx * BLK_M + read_dim_mn < M);
@@ -181,10 +182,10 @@ gemm_batched_kernel_tensorcore_32x32x16_fp16fp32_Akxm_Bnxk_Cnxm
                     int32_t    ldc)
 {
     static_assert(BLK_M == 32 && BLK_N == 32 && BLK_K == 16, "incorrect block shape");
-    int thx  = threadIdx.x;
-    int blx  = blockIdx.x;  // block's m position
-    int bly  = blockIdx.y;  // block's n position
-    int blz  = blockIdx.z;  // block's matrix in the batch
+    const int thx  = threadIdx.x;
+    const int blx  = blockIdx.x;  // block's m position
+    const int bly  = blockIdx.y;  // block's n position
+    const int blz  = blockIdx.z;  // block's matrix in the batch
     dA_input += size_t(blz) * M * K;
     dB_input += size_t(blz) * N * K;
     dC_input += size_t(blz) * N * M;
@@ -213,7 +214,7 @@ gemm_batched_kernel_tensorcore_32x32x16_fp16fp32_Akxm_Bnxk_Cnxm
         
 
 
-        read_dim_mn = thx % BLK_K;
+        read_dim_mn = thx % BLK_K;   // shall be (BLK_MN / 2) not BLK_K
         read_dim_k  = thx / BLK_K * 4;
         size_t offset_A = size_t(kk + read_dim_k) * size_t(lda) + size_t(blx * BLK_M + read_dim_mn);
         fragAB.vector_front = { dA_input[offset_A + 0 * size_t(lda)],

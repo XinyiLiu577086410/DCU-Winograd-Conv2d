@@ -284,73 +284,74 @@ __global__ void filter_transform_no_transpose(_Float16* __restrict__ filter,
   auto U = reinterpret_cast<inoutT*>(U_);
   __shared__ calcT tmp[work_group_size][TILE_IN_H][TILE_IN_W] ;
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  
+  if (idx >= simdDimSize) 
+    return;
+  
   int itx = threadIdx.x;
   calcT z0, z1, z2, z3, z4, z5, z6;
-  while (idx < simdDimSize) {
-    for (int i = 0; i < FLT_HW; ++i) {
-      z6 = filter[idx * FLT_H * FLT_W + 0 * FLT_W  + i];
+  for (int i = 0; i < FLT_HW; ++i) {
+    z6 = filter[idx * FLT_H * FLT_W + 0 * FLT_W  + i];
 
-      z0 = ((calcT)( 1.0f / 4.0f )) * z6;
-      z1 = ((calcT)(-1.0f / 6.0f )) * z6;
-      z2 = ((calcT)(-1.0f / 6.0f )) * z6;
-      z3 = ((calcT)( 1.0f / 24.0f)) * z6;
-      z4 = ((calcT)( 1.0f / 24.0f)) * z6;
+    z0 = ((calcT)( 1.0f / 4.0f )) * z6;
+    z1 = ((calcT)(-1.0f / 6.0f )) * z6;
+    z2 = ((calcT)(-1.0f / 6.0f )) * z6;
+    z3 = ((calcT)( 1.0f / 24.0f)) * z6;
+    z4 = ((calcT)( 1.0f / 24.0f)) * z6;
 
-      z6 = filter[idx * FLT_H * FLT_W + 1 * FLT_W  + i];
+    z6 = filter[idx * FLT_H * FLT_W + 1 * FLT_W  + i];
 
-      z1 += ((calcT)(-1.0f / 6.0f )) * z6;
-      z2 += ((calcT)( 1.0f / 6.0f )) * z6;
-      z3 += ((calcT)( 1.0f / 12.0f)) * z6;
-      z4 += ((calcT)(-1.0f / 12.0f)) * z6;
+    z1 += ((calcT)(-1.0f / 6.0f )) * z6;
+    z2 += ((calcT)( 1.0f / 6.0f )) * z6;
+    z3 += ((calcT)( 1.0f / 12.0f)) * z6;
+    z4 += ((calcT)(-1.0f / 12.0f)) * z6;
 
-      z6 = filter[idx * FLT_H * FLT_W + 2 * FLT_W  + i];
+    z6 = filter[idx * FLT_H * FLT_W + 2 * FLT_W  + i];
 
-      z1 += ((calcT)(-1.0f / 6.0f)) * z6;
-      z2 += ((calcT)(-1.0f / 6.0f)) * z6;
-      z3 += ((calcT)( 1.0f / 6.0f)) * z6;
-      z4 += ((calcT)( 1.0f / 6.0f)) * z6;
-      z5 = z6;
+    z1 += ((calcT)(-1.0f / 6.0f)) * z6;
+    z2 += ((calcT)(-1.0f / 6.0f)) * z6;
+    z3 += ((calcT)( 1.0f / 6.0f)) * z6;
+    z4 += ((calcT)( 1.0f / 6.0f)) * z6;
+    z5 = z6;
 
-      tmp[itx][0][i] = z0;
-      tmp[itx][1][i] = z1;
-      tmp[itx][2][i] = z2;
-      tmp[itx][3][i] = z3;
-      tmp[itx][4][i] = z4;
-      tmp[itx][5][i] = z5;
-    }
+    tmp[itx][0][i] = z0;
+    tmp[itx][1][i] = z1;
+    tmp[itx][2][i] = z2;
+    tmp[itx][3][i] = z3;
+    tmp[itx][4][i] = z4;
+    tmp[itx][5][i] = z5;
+  }
 
-    for (int i = 0; i < TILE_IN_H; ++i) {
-      z6 = tmp[itx][i][0];
+  for (int i = 0; i < TILE_IN_H; ++i) {
+    z6 = tmp[itx][i][0];
 
-      z0 = ((calcT)( 1.0f / 4.0f )) * z6;
-      z1 = ((calcT)(-1.0f / 6.0f )) * z6;
-      z2 = ((calcT)(-1.0f / 6.0f )) * z6;
-      z3 = ((calcT)( 1.0f / 24.0f)) * z6;
-      z4 = ((calcT)( 1.0f / 24.0f)) * z6;
+    z0 = ((calcT)( 1.0f / 4.0f )) * z6;
+    z1 = ((calcT)(-1.0f / 6.0f )) * z6;
+    z2 = ((calcT)(-1.0f / 6.0f )) * z6;
+    z3 = ((calcT)( 1.0f / 24.0f)) * z6;
+    z4 = ((calcT)( 1.0f / 24.0f)) * z6;
 
-      z6 = tmp[itx][i][1];
+    z6 = tmp[itx][i][1];
 
-      z1 += ((calcT)(-1.0f / 6.0f )) * z6;
-      z2 += ((calcT)( 1.0f / 6.0f )) * z6;
-      z3 += ((calcT)( 1.0f / 12.0f)) * z6;
-      z4 += ((calcT)(-1.0f / 12.0f)) * z6;
+    z1 += ((calcT)(-1.0f / 6.0f )) * z6;
+    z2 += ((calcT)( 1.0f / 6.0f )) * z6;
+    z3 += ((calcT)( 1.0f / 12.0f)) * z6;
+    z4 += ((calcT)(-1.0f / 12.0f)) * z6;
 
-      z6 = tmp[itx][i][2];
+    z6 = tmp[itx][i][2];
 
-      z1 += ((calcT)(-1.0f / 6.0f)) * z6;
-      z2 += ((calcT)(-1.0f / 6.0f)) * z6;
-      z3 += ((calcT)( 1.0f / 6.0f)) * z6;
-      z4 += ((calcT)( 1.0f / 6.0f)) * z6;
-      z5 = z6;
+    z1 += ((calcT)(-1.0f / 6.0f)) * z6;
+    z2 += ((calcT)(-1.0f / 6.0f)) * z6;
+    z3 += ((calcT)( 1.0f / 6.0f)) * z6;
+    z4 += ((calcT)( 1.0f / 6.0f)) * z6;
+    z5 = z6;
 
-      U[i * TILE_IN_W * simdDimSize + 0 * simdDimSize + idx] = z0;
-      U[i * TILE_IN_W * simdDimSize + 1 * simdDimSize + idx] = z1;
-      U[i * TILE_IN_W * simdDimSize + 2 * simdDimSize + idx] = z2;
-      U[i * TILE_IN_W * simdDimSize + 3 * simdDimSize + idx] = z3;
-      U[i * TILE_IN_W * simdDimSize + 4 * simdDimSize + idx] = z4;
-      U[i * TILE_IN_W * simdDimSize + 5 * simdDimSize + idx] = z5;
-    }
-    idx += blockDim.x * gridDim.x;
+    U[i * TILE_IN_W * simdDimSize + 0 * simdDimSize + idx] = z0;
+    U[i * TILE_IN_W * simdDimSize + 1 * simdDimSize + idx] = z1;
+    U[i * TILE_IN_W * simdDimSize + 2 * simdDimSize + idx] = z2;
+    U[i * TILE_IN_W * simdDimSize + 3 * simdDimSize + idx] = z3;
+    U[i * TILE_IN_W * simdDimSize + 4 * simdDimSize + idx] = z4;
+    U[i * TILE_IN_W * simdDimSize + 5 * simdDimSize + idx] = z5;
   }
 }
 
@@ -498,18 +499,18 @@ extern "C" void winconv_4x3(const void* param_ptr) {
     const int blk_ic = 16;
     dim3 block_dim(blk_ic, blk_oc);
     dim3 grid_dim(DIV_UP(us.ic , blk_ic), DIV_UP(us.oc, blk_oc));
-    filter_transform_no_transpose <_Float16, _Float16, work_group_size> <<<us.ic * us.oc / work_group_size, work_group_size>>> (filter_d, U_d, us, us.ic * us.oc);
+    filter_transform_no_transpose <_Float16, _Float16, work_group_size> <<<DIV_UP(us.ic * us.oc, work_group_size), work_group_size>>> (filter_d, U_d, us, us.ic * us.oc);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
     const float alpha = 1.0, beta = 0.0;
     hep_sgemm<_Float16, float>( vs.numTileTotal, us.oc, us.ic,
                                 alpha,
                                 (void*)(V_d),
-                                vs.numTileTotal,
+                                vs.numTileTotal,  // if you change V's layout, you need to change this
                                 (void*)(U_d),
-                                us.oc,
+                                us.ic,            // if you change U's layout, you need to change this
                                 beta,
                                 (void*)(M_d),
-                                vs.numTileTotal,
+                                vs.numTileTotal,  // if you change M's layout, you need to change this
                                 TILE_IN_H * TILE_IN_W,
                                 hipStreamDefault );
 
