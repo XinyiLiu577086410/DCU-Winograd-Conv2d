@@ -46,7 +46,7 @@ template <typename inoutT,
           typename calcT,
           size_t   work_group_size>
 __global__ void input_transform_collapsed_ic_x_tile
-                            (_Float16* __restrict__ image, 
+                            (fp16*     __restrict__ image, 
                              ImgShape               is,  
                              void*     __restrict__ V_, 
                              VShape                 vs, 
@@ -65,7 +65,7 @@ __global__ void input_transform_collapsed_ic_x_tile
   const uint64_t tile = idx % vs.numTileTotal;
   const TileIndex ti = getTileIndex(tile, ts);
   const uint64_t  b  = ti.b, th = ti.th, tw = ti.tw;
-  typedef _Float16 (*image_tensor_t) [is.ic][is.h][is.w];
+  typedef fp16 (*image_tensor_t) [is.ic][is.h][is.w];
   image_tensor_t image_tensor = (image_tensor_t)image;
 
   for (int w = 0; w < TILE_IN_W; ++w) {
@@ -182,9 +182,9 @@ template <typename inoutT,
           int      IC_BLK,
           int      OC_BLK>
 __global__ __launch_bounds__(OC_BLK * IC_BLK)  
-void filter_transform_2_dims_transpose( _Float16* __restrict__ filter_, 
-                              void*     __restrict__ U_,
-                              UShape                 us ) 
+void filter_transform_2_dims_transpose( fp16*     __restrict__ filter_, 
+                                        void*     __restrict__ U_,
+                                        UShape                 us ) 
 {
   static_assert(OC_BLK == IC_BLK);
   auto filter = reinterpret_cast<inoutT(*)[us.ic][FLT_H][FLT_W]>(filter_);
@@ -276,10 +276,10 @@ void filter_transform_2_dims_transpose( _Float16* __restrict__ filter_,
 template <typename inoutT, 
           typename calcT, 
           int work_group_size>
-__global__ void filter_transform_no_transpose(_Float16* __restrict__ filter, 
-                                void*     __restrict__ U_,
-                                UShape                 us, 
-                                int                    simdDimSize) 
+__global__ void filter_transform_no_transpose(fp16*     __restrict__ filter, 
+                                              void*     __restrict__ U_,
+                                              UShape                 us, 
+                                              int                    simdDimSize) 
 {
   auto U = reinterpret_cast<inoutT*>(U_);
   __shared__ calcT tmp[work_group_size][TILE_IN_H][TILE_IN_W] ;
@@ -360,10 +360,10 @@ template <typename inoutT,
           typename calcT,
           int work_group_size>
 __global__ void output_transform(void* __restrict__    M_, 
-                               int                   simdDimSize,
-                               _Float16* __restrict__ out, 
-                               OutShape               os,  
-                               TileShape              ts) 
+                                 int                   simdDimSize,
+                                 fp16*    __restrict__ out, 
+                                 OutShape              os,  
+                                 TileShape             ts) 
 {
   auto M = reinterpret_cast<inoutT*>(M_);
   __shared__ calcT tmp[work_group_size][TILE_OUT_H][TILE_IN_W];
@@ -462,22 +462,22 @@ __global__ void output_transform(void* __restrict__    M_,
     int n = ti.b, tw = ti.tw, th = ti.th;
 
     if(th * 4 + h < os.h && tw * 4 + 0 < os.w)
-      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 0)] = (_Float16) z0;
+      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 0)] = (fp16) z0;
     if(th * 4 + h < os.h && tw * 4 + 1 < os.w)
-      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 1)] = (_Float16) z1;
+      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 1)] = (fp16) z1;
     if(th * 4 + h < os.h && tw * 4 + 2 < os.w)
-      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 2)] = (_Float16) z2;
+      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 2)] = (fp16) z2;
     if(th * 4 + h < os.h && tw * 4 + 3 < os.w)
-      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 3)] = (_Float16) z3;
+      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 3)] = (fp16) z3;
   }
 }
 
 
 extern "C" void winconv_4x3(const void* param_ptr) {
     const mykernelParamType* param = (const mykernelParamType*)param_ptr;
-    _Float16* filter_d = param->pweight;
-    _Float16* image_d  = param->pin;
-    _Float16* out_d    = param->pout;
+    fp16* filter_d = param->pweight;
+    fp16* image_d  = param->pin;
+    fp16* out_d    = param->pout;
     void* U_d = reinterpret_cast<void*> (param->U_d);
     void* V_d = reinterpret_cast<void*> (param->V_d);
     void* M_d = reinterpret_cast<void*> (param->M_d);
@@ -493,16 +493,16 @@ extern "C" void winconv_4x3(const void* param_ptr) {
     VShape    vs = getVShape(is, ts);
   
     const size_t work_group_size = 64;
-    input_transform_collapsed_ic_x_tile <_Float16, _Float16, work_group_size> <<< vs.ic * vs.numTileTotal / work_group_size, work_group_size >>> (image_d, is, V_d, vs, vs.ic * vs.numTileTotal, ts, padding_h, padding_w);
+    input_transform_collapsed_ic_x_tile <fp16, fp16, work_group_size> <<< vs.ic * vs.numTileTotal / work_group_size, work_group_size >>> (image_d, is, V_d, vs, vs.ic * vs.numTileTotal, ts, padding_h, padding_w);
     HIP_CHECK_KERNEL("Kernel panic!!!");
     const int blk_oc = 16;
     const int blk_ic = 16;
     dim3 block_dim(blk_ic, blk_oc);
     dim3 grid_dim(DIV_UP(us.ic , blk_ic), DIV_UP(us.oc, blk_oc));
-    filter_transform_no_transpose <_Float16, _Float16, work_group_size> <<<DIV_UP(us.ic * us.oc, work_group_size), work_group_size>>> (filter_d, U_d, us, us.ic * us.oc);
+    filter_transform_no_transpose <fp16, fp16, work_group_size> <<<DIV_UP(us.ic * us.oc, work_group_size), work_group_size>>> (filter_d, U_d, us, us.ic * us.oc);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
     const float alpha = 1.0, beta = 0.0;
-    hep_sgemm<_Float16, float>( vs.numTileTotal, us.oc, us.ic,
+    hep_sgemm<fp16, float>( vs.numTileTotal, us.oc, us.ic,
                                 alpha,
                                 (void*)(V_d),
                                 vs.numTileTotal,  // if you change V's layout, you need to change this
@@ -514,7 +514,7 @@ extern "C" void winconv_4x3(const void* param_ptr) {
                                 TILE_IN_H * TILE_IN_W,
                                 hipStreamDefault );
 
-    output_transform <_Float16, _Float16, work_group_size> <<< us.oc * vs.numTileTotal / work_group_size, work_group_size >>>(M_d, us.oc * vs.numTileTotal, out_d, os, ts);
+    output_transform <fp16, fp16, work_group_size> <<< us.oc * vs.numTileTotal / work_group_size, work_group_size >>>(M_d, us.oc * vs.numTileTotal, out_d, os, ts);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
 
 }
@@ -597,7 +597,7 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
     std::cout << "M_size: " << M_size / 1024.0 << " KiB" << std::endl;
     std::exit(0);
 #endif
-    unsigned int malloc_size = sizeof(_Float16) * (
+    unsigned int malloc_size = sizeof(fp16) * (
           U_size
         + V_size
         + M_size

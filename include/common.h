@@ -126,3 +126,21 @@ __device__ __host__ TileIndex getTileIndex(uint64_t tileNo, TileShape ts) {
   ti.tw = tileNo % ts.w;
   return ti;
 }
+
+#define HEP_WARP_SIZE 64
+
+typedef _Float16 fp16;
+typedef fp16 fp16x8 __attribute__((ext_vector_type(8)));
+typedef fp16 fp16x4 __attribute__((ext_vector_type(4)));
+typedef float fp32x4 __attribute__((ext_vector_type(4)));
+
+
+union RegisterUnion
+{
+  fp16x8 vector8;
+  struct
+  {
+    fp16x4 vector_front;
+    fp16x4 vector_rear;
+  };
+};
