@@ -4,8 +4,6 @@
 #include <hip/hip_ext.h>
 #include "verfiy.h"
 #include "conv2d.h"
-extern "C" void winconv_4x3(const void* param_ptr) ;
-extern "C" void free_extra_vram(const void* param_ptr) ;
 int main(int argc, char**argv)
 {
     int n = atoi(argv[1]);
@@ -83,13 +81,14 @@ int main(int argc, char**argv)
     
     getkernelInfo(&problem, &kernelInfo, param);
 
-    dim3 groups(kernelInfo.blockx, kernelInfo.blocky, kernelInfo.blockz);
-    dim3 threads(kernelInfo.threadx, kernelInfo.thready, kernelInfo.threadz);
-    int ldsSize = kernelInfo.dynmicLdsSize;
+    // dim3 groups(kernelInfo.blockx, kernelInfo.blocky, kernelInfo.blockz);
+    // dim3 threads(kernelInfo.threadx, kernelInfo.thready, kernelInfo.threadz);
+    // int ldsSize = kernelInfo.dynmicLdsSize;
         
     /*******************************warm up and get result************************************/
     // hipExtLaunchKernel(kernelInfo.kernelPtr,groups,threads,(void**)&param,ldsSize,0,0,0,0);
-    winconv_4x3(param);
+
+    conv2d_fp16(param);
 
     hipMemcpy(pOut_host, pOut_device,  n*k*outh*outw*sizeof(_Float16), hipMemcpyDeviceToHost);
 
@@ -103,7 +102,7 @@ int main(int argc, char**argv)
     int iternum = 100;
     for(int i=0; i<iternum; i++)
     {
-        winconv_4x3(param);
+        conv2d_fp16(param);
     }
     hipEventRecord(stop,0);
 
@@ -113,8 +112,6 @@ int main(int argc, char**argv)
     printf("time: %f us\n", time_elapsed*1000/iternum);
     hipEventDestroy(start);
     hipEventDestroy(stop);  
-    
-    free_extra_vram(param);
 
     free(param);
 

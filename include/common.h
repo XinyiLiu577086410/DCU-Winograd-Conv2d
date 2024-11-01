@@ -3,7 +3,8 @@
 #include <assert.h>
 #include <sys/time.h>
 #include <stdint.h>
-
+#include <hip/hip_runtime.h>
+#include <hip/hip_ext.h>
 
 #define MIN(A, B) (((A) < (B)) ? (A) : (B))
 #define MAX(A, B) (((A) > (B)) ? (A) : (B))
@@ -118,7 +119,7 @@ inline VShape getVShape(ImgShape is, TileShape ts) {
   return vs;
 }
 
-__device__ __host__ TileIndex getTileIndex(uint64_t tileNo, TileShape ts) {
+inline __device__ __host__ TileIndex getTileIndex(uint64_t tileNo, TileShape ts) {
   TileIndex ti;
   ti.b = tileNo / ts.numTilePerImg;
   tileNo = tileNo % ts.numTilePerImg;
@@ -144,3 +145,38 @@ union RegisterUnion
     fp16x4 vector_rear;
   };
 };
+
+enum winograd_select {
+  select_4x3_non_fused,
+  select_2x3_fused
+};
+
+typedef struct mykernelParamType
+{
+  _Float16*   pin;                            //输入数据地址
+  _Float16*   pweight;                        //权值数据地址
+  _Float16*   pout;                           //输出数据地址
+
+  _Float16*   U_d = NULL;
+  _Float16*   V_d = NULL;
+  _Float16*   M_d = NULL;
+  _Float16*   Y_d = NULL;
+
+  unsigned int      n;                              //batch szie            
+  unsigned int      c;                              //channel number        
+  unsigned int      h;                              //数据高                
+  unsigned int      w;                              //数据宽                
+  unsigned int      k;                              //卷积核数量            
+  unsigned int      r;                              //卷积核高              
+  unsigned int      s;                              //卷积核宽              
+  unsigned int      u;                              //卷积在高方向上的步长  
+  unsigned int      v;                              //卷积在宽方向上的步长  
+  unsigned int      p;                              //卷积在高方向上的补边  
+  unsigned int      q;                              //卷积在宽方向上的补边  
+  unsigned int      Oh;                             //卷积在高方向上输出大小    
+  unsigned int      Ow;                             //卷积在宽方向上输出大小
+
+  winograd_select   kernel;                     //kernel type
+
+  ~mykernelParamType() { if(U_d) hipFree(this->U_d); }
+}mykernelParamType;                          

@@ -1,0 +1,478 @@
+#include "common.h"
+#include "error.h"
+#include "hep_sgemm.h"
+
+template <typename inoutT, 
+          typename calcT,
+          size_t   work_group_size>
+__global__ void input_transform_collapsed_ic_x_tile
+                            (fp16*     __restrict__ image, 
+                             ImgShape               is,  
+                             void*     __restrict__ V_, 
+                             VShape                 vs, 
+                             int                    simdDimSize, 
+                             TileShape              ts, 
+                             uint64_t               padding_h, 
+                             uint64_t               padding_w)
+{
+  auto V = reinterpret_cast<inoutT*>(V_);
+  __shared__ calcT tmp[work_group_size][TILE_IN_H][TILE_IN_W];
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int itx = threadIdx.x;
+  calcT z0, z1, z2, z3, z4, z5, z6;
+
+  const uint64_t ic   = idx / vs.numTileTotal;
+  const uint64_t tile = idx % vs.numTileTotal;
+  const TileIndex ti = getTileIndex(tile, ts);
+  const uint64_t  b  = ti.b, th = ti.th, tw = ti.tw;
+  typedef fp16 (*image_tensor_t) [is.ic][is.h][is.w];
+  image_tensor_t image_tensor = (image_tensor_t)image;
+
+  for (int w = 0; w < TILE_IN_W; ++w) {
+
+    z0 = z1 = z2 = z3 = z4 = z5 = (calcT)0.0;
+    if(th * TILE_OUT_H + 0 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
+      z6 = (calcT)image_tensor[b][ic][th * TILE_OUT_H + 0 - padding_h][tw * TILE_OUT_W + w - padding_w];
+      z0 = ((calcT)4.0f) * z6;
+    }
+
+    if(th * TILE_OUT_H + 1 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
+      z6 = (calcT)image_tensor[b][ic][th * TILE_OUT_H + 1 - padding_h][tw * TILE_OUT_W + w - padding_w];
+      z1 = ((calcT)-4.0f) * z6;
+      z2 = ((calcT) 4.0f) * z6;
+      z3 = ((calcT)-2.0f) * z6;
+      z4 = ((calcT) 2.0f) * z6;
+      z5 = ((calcT) 4.0f) * z6;
+    }
+
+    if(th * TILE_OUT_H + 2 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
+      z6 =  (calcT)image_tensor[b][ic][th * TILE_OUT_H + 2 - padding_h][tw * TILE_OUT_W + w - padding_w];
+      z0 += ((calcT)-5.0f) * z6;
+      z1 += ((calcT)-4.0f) * z6;
+      z2 += ((calcT)-4.0f) * z6;
+      z3 += -z6;
+      z4 += -z6;
+    }
+
+    if(th * TILE_OUT_H + 3 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
+      z6 =  (calcT)image_tensor[b][ic][th * TILE_OUT_H + 3 - padding_h][tw * TILE_OUT_W + w - padding_w];
+      z1 +=  z6;
+      z2 += -z6;
+      z3 += ((calcT) 2.0f) * z6;
+      z4 += ((calcT)-2.0f) * z6;
+      z5 += ((calcT)-5.0f) * z6;
+    }
+
+    if(th * TILE_OUT_H + 4 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
+      z6 =  (calcT)image_tensor[b][ic][th * TILE_OUT_H + 4 - padding_h][tw * TILE_OUT_W + w - padding_w];
+      z0 += z6;
+      z1 += z6;
+      z2 += z6;
+      z3 += z6;
+      z4 += z6;
+    }
+
+    if(th * TILE_OUT_H + 5 - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w) {
+      z6 =  (calcT)image_tensor[b][ic][th * TILE_OUT_H + 5 - padding_h][tw * TILE_OUT_W + w - padding_w];
+      z5 += z6;
+    }
+
+    tmp[itx][0][w] = z0;
+    tmp[itx][1][w] = z1;
+    tmp[itx][2][w] = z2;
+    tmp[itx][3][w] = z3;
+    tmp[itx][4][w] = z4;
+    tmp[itx][5][w] = z5;
+
+  }
+
+  for (int h = 0; h < TILE_IN_H; ++h) {
+    z6 = tmp[itx][h][0];
+
+    z0 = ((calcT)4.0f) * z6;
+
+    z6 = tmp[itx][h][1];
+
+    z1 = ((calcT)-4.0f) * z6;
+    z2 = ((calcT) 4.0f) * z6;
+    z3 = ((calcT)-2.0f) * z6;
+    z4 = ((calcT) 2.0f) * z6;
+    z5 = ((calcT) 4.0f) * z6;
+
+    z6 = tmp[itx][h][2];
+
+    z0 += ((calcT)-5.0f) * z6;
+    z1 += ((calcT)-4.0f) * z6;
+    z2 += ((calcT)-4.0f) * z6;
+    z3 += -z6;
+    z4 += -z6;
+
+    z6 = tmp[itx][h][3];
+
+    z1 +=  z6;
+    z2 += -z6;
+    z3 += ((calcT) 2.0f) * z6;
+    z4 += ((calcT)-2.0f) * z6;
+    z5 += ((calcT)-5.0f) * z6;
+
+    z6 = tmp[itx][h][4];
+
+    z0 += z6;
+    z1 += z6;
+    z2 += z6;
+    z3 += z6;
+    z4 += z6;
+
+    z6 = tmp[itx][h][5];
+
+    z5 += z6;
+
+    V[h * TILE_IN_W * simdDimSize + 0 * simdDimSize + idx] = z0;
+    V[h * TILE_IN_W * simdDimSize + 1 * simdDimSize + idx] = z1;
+    V[h * TILE_IN_W * simdDimSize + 2 * simdDimSize + idx] = z2;
+    V[h * TILE_IN_W * simdDimSize + 3 * simdDimSize + idx] = z3;
+    V[h * TILE_IN_W * simdDimSize + 4 * simdDimSize + idx] = z4;
+    V[h * TILE_IN_W * simdDimSize + 5 * simdDimSize + idx] = z5;
+  }
+
+}
+
+template <typename inoutT, 
+          typename calcT , 
+          int      IC_BLK,
+          int      OC_BLK>
+__global__ __launch_bounds__(OC_BLK * IC_BLK)  
+void filter_transform_2_dims_transpose( fp16*     __restrict__ filter_, 
+                                        void*     __restrict__ U_,
+                                        UShape                 us ) 
+{
+  static_assert(OC_BLK == IC_BLK);
+  auto filter = reinterpret_cast<inoutT(*)[us.ic][FLT_H][FLT_W]>(filter_);
+  auto U = reinterpret_cast<inoutT(*)[TILE_IN_W][us.ic][us.oc]>(U_);
+  __shared__ calcT tmp[IC_BLK][OC_BLK][TILE_IN_H][TILE_IN_W];
+  const int oc_local = threadIdx.y;  // thread's index on OC
+  const int ic_local = threadIdx.x;  // thread's index on IC
+  const int oc_blk   = blockIdx.y;   // workgroup's index on OC
+  const int ic_blk   = blockIdx.x;   // workgroup's index on IC
+  calcT z0, z1, z2, z3, z4, z5, z6;
+
+  for(int w = 0; w < FLT_W; ++w)
+    for(int h = 0; h < FLT_H; ++h)
+      if(oc_blk * OC_BLK + oc_local < us.oc && ic_blk * IC_BLK + ic_local < us.ic)
+        tmp[ic_local][oc_local][h][w] = filter[oc_blk * OC_BLK + oc_local][ic_blk * IC_BLK + ic_local][h][w];
+  
+  __syncthreads();
+  
+  for (int w = 0; w < FLT_HW; ++w) {
+    z6 = tmp[ic_local][oc_local][0][w];
+
+    z0 = ((calcT)( 1.0f / 4.0f )) * z6;
+    z1 = ((calcT)(-1.0f / 6.0f )) * z6;
+    z2 = ((calcT)(-1.0f / 6.0f )) * z6;
+    z3 = ((calcT)( 1.0f / 24.0f)) * z6;
+    z4 = ((calcT)( 1.0f / 24.0f)) * z6;
+
+    z6 = tmp[ic_local][oc_local][1][w];
+
+    z1 += ((calcT)(-1.0f / 6.0f )) * z6;
+    z2 += ((calcT)( 1.0f / 6.0f )) * z6;
+    z3 += ((calcT)( 1.0f / 12.0f)) * z6;
+    z4 += ((calcT)(-1.0f / 12.0f)) * z6;
+
+    z6 = tmp[ic_local][oc_local][2][w];
+
+    z1 += ((calcT)(-1.0f / 6.0f)) * z6;
+    z2 += ((calcT)(-1.0f / 6.0f)) * z6;
+    z3 += ((calcT)( 1.0f / 6.0f)) * z6;
+    z4 += ((calcT)( 1.0f / 6.0f)) * z6;
+    z5 = z6;
+
+    tmp[ic_local][oc_local][0][w] = z0;
+    tmp[ic_local][oc_local][1][w] = z1;
+    tmp[ic_local][oc_local][2][w] = z2;
+    tmp[ic_local][oc_local][3][w] = z3;
+    tmp[ic_local][oc_local][4][w] = z4;
+    tmp[ic_local][oc_local][5][w] = z5;
+  }
+
+  for (int h = 0; h < TILE_IN_H; ++h) {
+    z6 = tmp[ic_local][oc_local][h][0];
+
+    z0 = ((calcT)( 1.0f / 4.0f )) * z6;
+    z1 = ((calcT)(-1.0f / 6.0f )) * z6;
+    z2 = ((calcT)(-1.0f / 6.0f )) * z6;
+    z3 = ((calcT)( 1.0f / 24.0f)) * z6;
+    z4 = ((calcT)( 1.0f / 24.0f)) * z6;
+
+    z6 = tmp[ic_local][oc_local][h][1];
+
+    z1 += ((calcT)(-1.0f / 6.0f )) * z6;
+    z2 += ((calcT)( 1.0f / 6.0f )) * z6;
+    z3 += ((calcT)( 1.0f / 12.0f)) * z6;
+    z4 += ((calcT)(-1.0f / 12.0f)) * z6;
+
+    z6 = tmp[ic_local][oc_local][h][2];
+
+    z1 += ((calcT)(-1.0f / 6.0f)) * z6;
+    z2 += ((calcT)(-1.0f / 6.0f)) * z6;
+    z3 += ((calcT)( 1.0f / 6.0f)) * z6;
+    z4 += ((calcT)( 1.0f / 6.0f)) * z6;
+    z5 = z6;
+
+    if(oc_blk * OC_BLK + oc_local < us.oc && ic_blk * IC_BLK + ic_local < us.ic) {
+      U[h][0][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z0;
+      U[h][1][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z1;
+      U[h][2][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z2;
+      U[h][3][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z3;
+      U[h][4][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z4;
+      U[h][5][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z5;
+    }
+  }
+
+  __syncthreads();
+
+}
+
+template <typename inoutT, 
+          typename calcT, 
+          int work_group_size>
+__global__ void filter_transform_no_transpose(fp16*     __restrict__ filter, 
+                                              void*     __restrict__ U_,
+                                              UShape                 us, 
+                                              int                    simdDimSize) 
+{
+  auto U = reinterpret_cast<inoutT*>(U_);
+  __shared__ calcT tmp[work_group_size][TILE_IN_H][TILE_IN_W] ;
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  
+  if (idx >= simdDimSize) 
+    return;
+  
+  int itx = threadIdx.x;
+  calcT z0, z1, z2, z3, z4, z5, z6;
+  for (int i = 0; i < FLT_HW; ++i) {
+    z6 = filter[idx * FLT_H * FLT_W + 0 * FLT_W  + i];
+
+    z0 = ((calcT)( 1.0f / 4.0f )) * z6;
+    z1 = ((calcT)(-1.0f / 6.0f )) * z6;
+    z2 = ((calcT)(-1.0f / 6.0f )) * z6;
+    z3 = ((calcT)( 1.0f / 24.0f)) * z6;
+    z4 = ((calcT)( 1.0f / 24.0f)) * z6;
+
+    z6 = filter[idx * FLT_H * FLT_W + 1 * FLT_W  + i];
+
+    z1 += ((calcT)(-1.0f / 6.0f )) * z6;
+    z2 += ((calcT)( 1.0f / 6.0f )) * z6;
+    z3 += ((calcT)( 1.0f / 12.0f)) * z6;
+    z4 += ((calcT)(-1.0f / 12.0f)) * z6;
+
+    z6 = filter[idx * FLT_H * FLT_W + 2 * FLT_W  + i];
+
+    z1 += ((calcT)(-1.0f / 6.0f)) * z6;
+    z2 += ((calcT)(-1.0f / 6.0f)) * z6;
+    z3 += ((calcT)( 1.0f / 6.0f)) * z6;
+    z4 += ((calcT)( 1.0f / 6.0f)) * z6;
+    z5 = z6;
+
+    tmp[itx][0][i] = z0;
+    tmp[itx][1][i] = z1;
+    tmp[itx][2][i] = z2;
+    tmp[itx][3][i] = z3;
+    tmp[itx][4][i] = z4;
+    tmp[itx][5][i] = z5;
+  }
+
+  for (int i = 0; i < TILE_IN_H; ++i) {
+    z6 = tmp[itx][i][0];
+
+    z0 = ((calcT)( 1.0f / 4.0f )) * z6;
+    z1 = ((calcT)(-1.0f / 6.0f )) * z6;
+    z2 = ((calcT)(-1.0f / 6.0f )) * z6;
+    z3 = ((calcT)( 1.0f / 24.0f)) * z6;
+    z4 = ((calcT)( 1.0f / 24.0f)) * z6;
+
+    z6 = tmp[itx][i][1];
+
+    z1 += ((calcT)(-1.0f / 6.0f )) * z6;
+    z2 += ((calcT)( 1.0f / 6.0f )) * z6;
+    z3 += ((calcT)( 1.0f / 12.0f)) * z6;
+    z4 += ((calcT)(-1.0f / 12.0f)) * z6;
+
+    z6 = tmp[itx][i][2];
+
+    z1 += ((calcT)(-1.0f / 6.0f)) * z6;
+    z2 += ((calcT)(-1.0f / 6.0f)) * z6;
+    z3 += ((calcT)( 1.0f / 6.0f)) * z6;
+    z4 += ((calcT)( 1.0f / 6.0f)) * z6;
+    z5 = z6;
+
+    U[i * TILE_IN_W * simdDimSize + 0 * simdDimSize + idx] = z0;
+    U[i * TILE_IN_W * simdDimSize + 1 * simdDimSize + idx] = z1;
+    U[i * TILE_IN_W * simdDimSize + 2 * simdDimSize + idx] = z2;
+    U[i * TILE_IN_W * simdDimSize + 3 * simdDimSize + idx] = z3;
+    U[i * TILE_IN_W * simdDimSize + 4 * simdDimSize + idx] = z4;
+    U[i * TILE_IN_W * simdDimSize + 5 * simdDimSize + idx] = z5;
+  }
+}
+
+template <typename inoutT, 
+          typename calcT,
+          int work_group_size>
+__global__ void output_transform(void* __restrict__    M_, 
+                                 int                   simdDimSize,
+                                 fp16*    __restrict__ out, 
+                                 OutShape              os,  
+                                 TileShape             ts) 
+{
+  auto M = reinterpret_cast<inoutT*>(M_);
+  __shared__ calcT tmp[work_group_size][TILE_OUT_H][TILE_IN_W];
+  int idx = blockIdx.x * blockDim.x + threadIdx.x; 
+  int itx = threadIdx.x;
+
+  calcT z0, z1, z2, z3, z4;
+  for (int w = 0; w < TILE_IN_W; ++w) {
+    z4 = M[0 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+    z0 = z4;
+
+    z4 = M[1 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+    z0 = z0 + z4;
+    z1 = z4;
+    z2 = z4;
+    z3 = z4;
+    
+    z4 = M[2 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+    z0 +=  z4;
+    z1 += -z4;
+    z2 +=  z4;
+    z3 += -z4;
+
+    z4 = M[3 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+    z0 += z4;
+    z1 += ((calcT)2.0f) * z4;
+    z2 += ((calcT)4.0f) * z4;
+    z3 += ((calcT)8.0f) * z4;
+
+    z4 = M[4 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+    z0 += z4;
+    z1 += ((calcT)-2.0f) * z4;
+    z2 += ((calcT) 4.0f) * z4;
+    z3 += ((calcT)-8.0f) * z4;
+
+    z4 = M[5 * TILE_IN_W * simdDimSize + w * simdDimSize + idx];
+
+    z3 += z4;
+
+    tmp[itx][0][w] = z0;
+    tmp[itx][1][w] = z1;
+    tmp[itx][2][w] = z2;
+    tmp[itx][3][w] = z3;
+  }
+
+  for (int h = 0; h < TILE_OUT_HW; ++h) {
+    z4 = tmp[itx][h][0];
+
+    z0 = z4;
+
+
+    z4 = tmp[itx][h][1];
+
+    z0 += z4;
+    z1 = z4;
+    z2 = z4;
+    z3 = z4;
+
+    z4 = tmp[itx][h][2];
+    
+    z0 += z4;
+    z1 += -z4;
+    z2 += z4;
+    z3 += -z4;
+
+    z4 = tmp[itx][h][3];
+
+    z0 += z4;
+    z1 += ((calcT)2.0f) * z4;
+    z2 += ((calcT)4.0f) * z4;
+    z3 += ((calcT)8.0f) * z4;
+
+
+    z4 = tmp[itx][h][4];
+
+
+    z0 += z4;
+    z1 += ((calcT)-2.0f) * z4;
+    z2 += ((calcT) 4.0f) * z4;
+    z3 += ((calcT)-8.0f) * z4;
+
+
+    z4 = tmp[itx][h][5];
+
+    z3 += z4;
+
+
+    int k = idx / ts.numTileTotal;
+    int b = idx % ts.numTileTotal;
+    TileIndex ti = getTileIndex(b, ts);
+    int n = ti.b, tw = ti.tw, th = ti.th;
+
+    if(th * 4 + h < os.h && tw * 4 + 0 < os.w)
+      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 0)] = (fp16) z0;
+    if(th * 4 + h < os.h && tw * 4 + 1 < os.w)
+      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 1)] = (fp16) z1;
+    if(th * 4 + h < os.h && tw * 4 + 2 < os.w)
+      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 2)] = (fp16) z2;
+    if(th * 4 + h < os.h && tw * 4 + 3 < os.w)
+      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 3)] = (fp16) z3;
+  }
+}
+
+void winograd_4x3_none_fused(const void* param_ptr) {
+    const mykernelParamType* param = (const mykernelParamType*)param_ptr;
+    fp16* filter_d = param->pweight;
+    fp16* image_d  = param->pin;
+    fp16* out_d    = param->pout;
+    void* U_d = reinterpret_cast<void*> (param->U_d);
+    void* V_d = reinterpret_cast<void*> (param->V_d);
+    void* M_d = reinterpret_cast<void*> (param->M_d);
+    void* Y_d = reinterpret_cast<void*> (param->Y_d);
+    uint64_t padding_h = param->p;
+    uint64_t padding_w = param->q;
+
+    ImgShape  is = {param->n, param->c, param->h, param->w};
+    FltShape  fs = {param->k, param->c, param->r, param->s};
+    OutShape  os = getOutShape(is, fs, padding_h, padding_w);
+    TileShape ts = getTileShape(os);
+    UShape    us = getUShape(fs);
+    VShape    vs = getVShape(is, ts);
+  
+    const size_t work_group_size = 64;
+    input_transform_collapsed_ic_x_tile <fp16, fp16, work_group_size> <<< vs.ic * vs.numTileTotal / work_group_size, work_group_size >>> (image_d, is, V_d, vs, vs.ic * vs.numTileTotal, ts, padding_h, padding_w);
+    HIP_CHECK_KERNEL("Kernel panic!!!");
+    const int blk_oc = 16;
+    const int blk_ic = 16;
+    dim3 block_dim(blk_ic, blk_oc);
+    dim3 grid_dim(DIV_UP(us.ic , blk_ic), DIV_UP(us.oc, blk_oc));
+    filter_transform_no_transpose <fp16, fp16, work_group_size> <<<DIV_UP(us.ic * us.oc, work_group_size), work_group_size>>> (filter_d, U_d, us, us.ic * us.oc);
+    HIP_CHECK_KERNEL("Kernel panic!!!");    
+    const float alpha = 1.0, beta = 0.0;
+    hep_sgemm<fp16, float>( vs.numTileTotal, us.oc, us.ic,
+                                alpha,
+                                (void*)(V_d),
+                                vs.numTileTotal,  // if you change V's layout, you need to change this
+                                (void*)(U_d),
+                                us.ic,            // if you change U's layout, you need to change this
+                                beta,
+                                (void*)(M_d),
+                                vs.numTileTotal,  // if you change M's layout, you need to change this
+                                TILE_IN_H * TILE_IN_W,
+                                hipStreamDefault );
+
+    output_transform <fp16, fp16, work_group_size> <<< us.oc * vs.numTileTotal / work_group_size, work_group_size >>>(M_d, us.oc * vs.numTileTotal, out_d, os, ts);
+    HIP_CHECK_KERNEL("Kernel panic!!!");    
+
+}

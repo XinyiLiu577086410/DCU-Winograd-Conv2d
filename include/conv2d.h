@@ -39,4 +39,5 @@ typedef struct
 int getParamsize(__in__ problem_t* problem, __out__ int* paramSize);
 int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, __in_out__ void* param);
 
+extern "C" void conv2d_fp16(const void* param_ptr);
 #endif
