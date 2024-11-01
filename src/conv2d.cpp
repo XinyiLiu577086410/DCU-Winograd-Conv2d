@@ -1,6 +1,12 @@
-#include <cstdio>
-#include <cstdint>
 #include "conv2d.h"
+
+#define FLT_H      3L
+#define FLT_W      3L
+#define TILE_IN_H  6L
+#define TILE_IN_W  6L
+#define TILE_OUT_H 4L
+#define TILE_OUT_W 4L
+/* Above macros must be defined before include common.h */
 #include "common.h"
 #include "winograd.h"
 /*选手自定义的kernel入参结构体*/
@@ -73,25 +79,17 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
   unsigned int U_size = TILE_IN_H * TILE_IN_W * k * c;
   unsigned int V_size = TILE_IN_H * TILE_IN_W * vs.numTileTotal * c;
   unsigned int M_size = TILE_IN_H  * TILE_IN_W  * k * vs.numTileTotal;
-  
-  #ifdef PRINT_TENSOR_SIZE
-    std::cout << "n = " << n << ", c = " << c << ", h = " << h << ", w = " << w << ", k = " << k << ", r = " << r << ", s = " << s << ", u = " << u << ", v = " << v << ", p = " << p << ", q = " << q << std::endl;
-    std::cout << "image_size: " << image_size / 1024.0 << " KiB" << std::endl;
-    std::cout << "filter_size: " << filter_size / 1024.0 << " KiB" << std::endl;
-    std::cout << "out_size: " << out_size / 1024.0 << " KiB" << std::endl;
-    std::cout << "U_size: " << U_size / 1024.0 << " KiB" << std::endl;
-    std::cout << "V_size: " << V_size / 1024.0 << " KiB" << std::endl;
-    std::cout << "M_size: " << M_size / 1024.0 << " KiB" << std::endl;
-    std::exit(0);
-  #endif
-
-  unsigned int malloc_size = sizeof(fp16) * (U_size + V_size + M_size);
-  
-  hipMalloc(&pArgs->U_d, malloc_size);
-  
-  pArgs->V_d = pArgs->U_d + U_size;
-  pArgs->M_d = pArgs->V_d + V_size;
-  pArgs->Y_d = pArgs->M_d + M_size;
+  if(image_size * sizeof(fp16) >= 2 * L2_CACHE_SIZE) {
+    pArgs->U_d = NULL;
+    pArgs->kernel = winograd_select::select_2x3_fused;
+  } else {
+    unsigned int malloc_size = sizeof(fp16) * (U_size + V_size + M_size);
+    hipMalloc(&pArgs->U_d, malloc_size);
+    pArgs->V_d = pArgs->U_d + U_size;
+    pArgs->M_d = pArgs->V_d + V_size;
+    pArgs->Y_d = pArgs->M_d + M_size;
+    pArgs->kernel = winograd_select::select_4x3_non_fused;
+  }
   return 0;
 }
 
@@ -101,7 +99,9 @@ extern "C" void conv2d_fp16(const void* param_ptr) {
     case winograd_select::select_4x3_non_fused:
       winograd_4x3_none_fused(param_ptr);
       break;
-
+    case winograd_select::select_2x3_fused:
+      winograd_2x3_fused(param_ptr);
+      break;
     default:
       winograd_4x3_none_fused(param_ptr);
   };

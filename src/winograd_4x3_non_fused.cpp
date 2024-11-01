@@ -1,3 +1,9 @@
+#define FLT_H      3L
+#define FLT_W      3L
+#define TILE_IN_H  6L
+#define TILE_IN_W  6L
+#define TILE_OUT_H 4L
+#define TILE_OUT_W 4L
 #include "common.h"
 #include "error.h"
 #include "hep_sgemm.h"
@@ -163,7 +169,7 @@ void filter_transform_2_dims_transpose( fp16*     __restrict__ filter_,
   
   __syncthreads();
   
-  for (int w = 0; w < FLT_HW; ++w) {
+  for (int w = 0; w < FLT_H; ++w) {
     z6 = tmp[ic_local][oc_local][0][w];
 
     z0 = ((calcT)( 1.0f / 4.0f )) * z6;
@@ -250,7 +256,7 @@ __global__ void filter_transform_no_transpose(fp16*     __restrict__ filter,
   
   int itx = threadIdx.x;
   calcT z0, z1, z2, z3, z4, z5, z6;
-  for (int i = 0; i < FLT_HW; ++i) {
+  for (int i = 0; i < FLT_W; ++i) {
     z6 = filter[idx * FLT_H * FLT_W + 0 * FLT_W  + i];
 
     z0 = ((calcT)( 1.0f / 4.0f )) * z6;
@@ -373,7 +379,7 @@ __global__ void output_transform(void* __restrict__    M_,
     tmp[itx][3][w] = z3;
   }
 
-  for (int h = 0; h < TILE_OUT_HW; ++h) {
+  for (int h = 0; h < TILE_OUT_H; ++h) {
     z4 = tmp[itx][h][0];
 
     z0 = z4;
@@ -432,6 +438,7 @@ __global__ void output_transform(void* __restrict__    M_,
 }
 
 void winograd_4x3_none_fused(const void* param_ptr) {
+    // std::cout << "winograd_4x3_none_fused" << std::endl;
     const mykernelParamType* param = (const mykernelParamType*)param_ptr;
     fp16* filter_d = param->pweight;
     fp16* image_d  = param->pin;

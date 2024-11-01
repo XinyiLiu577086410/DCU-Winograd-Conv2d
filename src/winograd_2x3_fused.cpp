@@ -1,0 +1,365 @@
+#define FLT_H      3L
+#define FLT_W      3L
+#define TILE_IN_H  4L
+#define TILE_IN_W  4L
+#define TILE_OUT_H 2L
+#define TILE_OUT_W 2L
+#include "common.h"
+#include "error.h"
+
+template <int  BLK_M,
+          int  BLK_N,
+          int  BLK_K>
+__global__ void __launch_bounds__(32*16*2)
+winograd_2x3_kernel(_Float16* filter_d,
+                    FltShape  fs,
+                    _Float16* image_d,
+                    ImgShape  is,
+                    uint64_t  padding_h,
+                    uint64_t  padding_w,
+                    _Float16* out_d,
+                    OutShape  os,
+                    TileShape ts)
+{
+  /*! Dimensions
+      M => P / Tiles
+      N => K / Output channels
+      K => C / Input channels
+  */
+  __shared__ union {
+    struct {
+      fp16 V[TILE_IN_H][TILE_IN_W][BLK_K][BLK_M];
+      fp16 U[TILE_IN_H][TILE_IN_W][BLK_K][BLK_N];
+    };
+    struct {
+      fp16 Y[TILE_IN_H][TILE_IN_W][BLK_M][BLK_N];
+    };
+  } lds;
+  
+  const int thx = threadIdx.x;
+  const int thy = threadIdx.y;
+  const int tid = thx + thy * blockDim.x;
+  const int blx = blockIdx.x;
+  const int bly = blockIdx.y;
+  
+  typedef fp16 (*image_tensor_t) [is.ic][is.h][is.w];
+  auto image = (image_tensor_t) image_d;
+  typedef fp16 (*filter_tensor_t) [fs.ic][fs.h][fs.w];
+  auto filter = (filter_tensor_t) filter_d;
+  typedef fp16 (*output_tensor_t) [os.oc][os.h][os.w];
+  auto output = (output_tensor_t) out_d;
+  fp32x4 C_reg_acc[4] = {0};
+  int local_oc_idx;
+  int local_tile_idx;
+  int local_ic_idx;
+  int tile_blk = BLK_M * blx;
+  int oc_blk   = BLK_N * bly;
+
+  for(int ic_blk = 0; ic_blk < is.ic; ic_blk += BLK_K)
+  {
+    int local_ic_idx;
+    int local_oc_idx;
+    fp16 z0, z1, z2, z3, z6;
+    
+    if(thy == 1) { // must be 1 not 0
+      local_ic_idx   = thx % BLK_K;
+      local_oc_idx   = thx / BLK_K;
+      // ! read filter slice from global memory into shared memory
+      if(oc_blk + local_oc_idx < fs.oc)
+        if(ic_blk + local_ic_idx < fs.ic)
+          for(int h = 0; h < FLT_H; ++h)
+            for(int w = 0; w < FLT_W; ++w)
+                lds.U[h][w][local_ic_idx][local_oc_idx] = filter[oc_blk + local_oc_idx][ic_blk + local_ic_idx][h][w];
+        else 
+          for(int h = 0; h < FLT_H; ++h)
+            for(int w = 0; w < FLT_W; ++w)
+                lds.U[h][w][local_ic_idx][local_oc_idx] = 0;
+
+      //! filter transform
+      for (int w = 0; w < FLT_W; ++w) {
+        z6 = lds.U[0][w][local_ic_idx][local_oc_idx];
+
+        z0 = ((fp16)( 1.0f )) * z6;
+        z1 = ((fp16)( 1.0f / 2.0f )) * z6;
+        z2 = ((fp16)( 1.0f / 2.0f )) * z6;
+
+        z6 = lds.U[1][w][local_ic_idx][local_oc_idx];
+
+        z1 += ((fp16)( 1.0f / 2.0f )) * z6;
+        z2 += ((fp16)(-1.0f / 2.0f )) * z6;
+
+
+        z6 = lds.U[2][w][local_ic_idx][local_oc_idx];
+
+        z1 += ((fp16)( 1.0f / 2.0f )) * z6;
+        z2 += ((fp16)( 1.0f / 2.0f )) * z6;
+        z3 =  ((fp16)( 1.0f )) * z6;
+
+        lds.U[0][w][local_ic_idx][local_oc_idx] = z0;
+        lds.U[1][w][local_ic_idx][local_oc_idx] = z1;
+        lds.U[2][w][local_ic_idx][local_oc_idx] = z2;
+        lds.U[3][w][local_ic_idx][local_oc_idx] = z3;
+      }
+
+      for (int h = 0; h < TILE_IN_H; ++h) {
+        z6 = lds.U[h][0][local_ic_idx][local_oc_idx];
+
+        z0 = ((fp16)( 1.0f )) * z6;
+        z1 = ((fp16)( 1.0f / 2.0f )) * z6;
+        z2 = ((fp16)( 1.0f / 2.0f )) * z6;
+
+        z6 = lds.U[h][1][local_ic_idx][local_oc_idx];
+
+        z1 += ((fp16)( 1.0f / 2.0f )) * z6;
+        z2 += ((fp16)(-1.0f / 2.0f )) * z6;
+
+        z6 = lds.U[h][2][local_ic_idx][local_oc_idx];
+
+        z1 += ((fp16)( 1.0f / 2.0f)) * z6;
+        z2 += ((fp16)( 1.0f / 2.0f)) * z6;
+        z3 = ((fp16)( 1.0f )) * z6;
+
+        lds.U[h][0][local_ic_idx][local_oc_idx] = z0;
+        lds.U[h][1][local_ic_idx][local_oc_idx] = z1;
+        lds.U[h][2][local_ic_idx][local_oc_idx] = z2;
+        lds.U[h][3][local_ic_idx][local_oc_idx] = z3;
+      }
+    }
+
+    if(thy == 0) { // must be 0 not 1
+      local_tile_idx = thx % BLK_M;
+      local_ic_idx   = thx / BLK_M;
+
+      //! read image slice from global memory into shared memory
+      if(tile_blk + local_tile_idx < ts.numTileTotal) {
+        const TileIndex ti = getTileIndex(tile_blk + local_tile_idx, ts);
+        const uint64_t b = ti.b, th = ti.th, tw = ti.tw;
+        for(int h = 0; h < TILE_IN_H; ++h)
+          for(int w = 0; w < TILE_IN_W; ++w)
+            if(th * TILE_OUT_H + h - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w && ic_blk + local_ic_idx < is.ic) {
+              lds.V[h][w][local_ic_idx][local_tile_idx] = image[b][ic_blk + local_ic_idx][th * TILE_OUT_H + h - padding_h][tw * TILE_OUT_W + w - padding_w];
+            } else {
+              lds.V[h][w][local_ic_idx][local_tile_idx] = 0;
+            }
+      }
+
+      //！image transform
+      for (int w = 0; w < TILE_IN_W; ++w) {
+        z6 = lds.V[0][w][local_ic_idx][local_tile_idx];
+        z0 = ((fp16) 1.0f) * z6;
+
+        z6 = lds.V[1][w][local_ic_idx][local_tile_idx];
+        z1 = ((fp16) 1.0f) * z6;
+        z2 = ((fp16)-1.0f) * z6;
+        z3 = ((fp16) 1.0f) * z6;
+
+        z6 = lds.V[2][w][local_ic_idx][local_tile_idx];
+        z0 += ((fp16)-1.0f) * z6;
+        z1 += ((fp16) 1.0f) * z6;
+        z2 += ((fp16) 1.0f) * z6;
+
+        z6 = lds.V[3][w][local_ic_idx][local_tile_idx];
+        z3 += ((fp16)-1.0f) * z6;
+
+        lds.V[0][w][local_ic_idx][local_tile_idx] = z0;
+        lds.V[1][w][local_ic_idx][local_tile_idx] = z1;
+        lds.V[2][w][local_ic_idx][local_tile_idx] = z2;
+        lds.V[3][w][local_ic_idx][local_tile_idx] = z3;
+      }
+
+      for (int h = 0; h < TILE_IN_H; ++h) {
+        z6 = lds.V[h][0][local_ic_idx][local_tile_idx];
+        z0 = ((fp16) 1.0f) * z6;
+
+        z6 = lds.V[h][1][local_ic_idx][local_tile_idx];
+        z1 = ((fp16) 1.0f) * z6;
+        z2 = ((fp16)-1.0f) * z6;
+        z3 = ((fp16) 1.0f) * z6;
+
+        z6 = lds.V[h][2][local_ic_idx][local_tile_idx];
+        z0 += ((fp16)-1.0f) * z6;
+        z1 += ((fp16) 1.0f) * z6;
+        z2 += ((fp16) 1.0f) * z6;
+
+        z6 = lds.V[h][3][local_ic_idx][local_tile_idx];
+        z3 += ((fp16)-1.0f) * z6;
+
+        lds.V[h][0][local_ic_idx][local_tile_idx] = z0;
+        lds.V[h][1][local_ic_idx][local_tile_idx] = z1;
+        lds.V[h][2][local_ic_idx][local_tile_idx] = z2;
+        lds.V[h][3][local_ic_idx][local_tile_idx] = z3;
+      }
+    }
+
+
+    __syncthreads();
+
+    asm volatile("s_waitcnt lgkmcnt(0)\n\t");
+
+    //! do batched gemm
+    int elem_idx = tid / 64;
+    int h = elem_idx / TILE_IN_W;
+    int w = elem_idx % TILE_IN_W;
+    RegisterUnion frag_AB_0, frag_AB_1;
+    size_t read_dim_k  = (tid % 64) / (BLK_M / 2) * 4;
+    size_t read_dim_mn = (tid % 64) % (BLK_M / 2);
+    frag_AB_0.vector_front = {lds.V[h][w][read_dim_k + 0][read_dim_mn], 
+                              lds.V[h][w][read_dim_k + 1][read_dim_mn], 
+                              lds.V[h][w][read_dim_k + 2][read_dim_mn], 
+                              lds.V[h][w][read_dim_k + 3][read_dim_mn]};
+    frag_AB_0.vector_rear  = {lds.U[h][w][read_dim_k + 0][read_dim_mn], 
+                              lds.U[h][w][read_dim_k + 1][read_dim_mn], 
+                              lds.U[h][w][read_dim_k + 2][read_dim_mn], 
+                              lds.U[h][w][read_dim_k + 3][read_dim_mn]};
+    read_dim_mn += 16;
+    frag_AB_1.vector_front = {lds.V[h][w][read_dim_k + 0][read_dim_mn], 
+                              lds.V[h][w][read_dim_k + 1][read_dim_mn], 
+                              lds.V[h][w][read_dim_k + 2][read_dim_mn], 
+                              lds.V[h][w][read_dim_k + 3][read_dim_mn]};
+    frag_AB_1.vector_rear  = {lds.U[h][w][read_dim_k + 0][read_dim_mn], 
+                              lds.U[h][w][read_dim_k + 1][read_dim_mn], 
+                              lds.U[h][w][read_dim_k + 2][read_dim_mn], 
+                              lds.U[h][w][read_dim_k + 3][read_dim_mn]};
+    asm volatile("s_waitcnt lgkmcnt(0)\n\t");
+
+    asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[0]), "+v"(frag_AB_0.vector_front), "+v"(frag_AB_0.vector_rear));
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+
+    asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[1]), "+v"(frag_AB_0.vector_front), "+v"(frag_AB_1.vector_rear));
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+
+    asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[2]), "+v"(frag_AB_1.vector_front), "+v"(frag_AB_0.vector_rear));
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+
+    asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[3]), "+v"(frag_AB_1.vector_front), "+v"(frag_AB_1.vector_rear));
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+    asm volatile("s_nop 8\n\t");
+
+  } //! end for ic_blk = 0 to K by BLK_K
+
+
+  __syncthreads();
+
+  //! Store the result matrices of batched gemm into lds.
+  int elem_idx = tid / 64;
+  int h = elem_idx / TILE_IN_W;
+  int w = elem_idx % TILE_IN_W;
+  size_t write_local_tile = (tid % 64) % (BLK_M / 2);
+  size_t write_local_oc   = (tid % 64) / (BLK_M / 2);
+  lds.Y[h][w][write_local_oc +  0 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0].x;
+  lds.Y[h][w][write_local_oc +  4 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0].y;
+  lds.Y[h][w][write_local_oc +  8 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0].z;
+  lds.Y[h][w][write_local_oc + 12 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0].w;
+
+  lds.Y[h][w][write_local_oc +  0 + 16][write_local_tile +  0] = (_Float16)C_reg_acc[1].x;
+  lds.Y[h][w][write_local_oc +  4 + 16][write_local_tile +  0] = (_Float16)C_reg_acc[1].y;
+  lds.Y[h][w][write_local_oc +  8 + 16][write_local_tile +  0] = (_Float16)C_reg_acc[1].z;
+  lds.Y[h][w][write_local_oc + 12 + 16][write_local_tile +  0] = (_Float16)C_reg_acc[1].w;
+
+  lds.Y[h][w][write_local_oc +  0 +  0][write_local_tile + 16] = (_Float16)C_reg_acc[2].x;
+  lds.Y[h][w][write_local_oc +  4 +  0][write_local_tile + 16] = (_Float16)C_reg_acc[2].y;
+  lds.Y[h][w][write_local_oc +  8 +  0][write_local_tile + 16] = (_Float16)C_reg_acc[2].z;
+  lds.Y[h][w][write_local_oc + 12 +  0][write_local_tile + 16] = (_Float16)C_reg_acc[2].w;
+
+  lds.Y[h][w][write_local_oc +  0 + 16][write_local_tile + 16] = (_Float16)C_reg_acc[3].x;
+  lds.Y[h][w][write_local_oc +  4 + 16][write_local_tile + 16] = (_Float16)C_reg_acc[3].y;
+  lds.Y[h][w][write_local_oc +  8 + 16][write_local_tile + 16] = (_Float16)C_reg_acc[3].z;
+  lds.Y[h][w][write_local_oc + 12 + 16][write_local_tile + 16] = (_Float16)C_reg_acc[3].w;
+
+  __syncthreads();
+  
+
+  local_oc_idx   = tid / BLK_M;
+  local_tile_idx = tid % BLK_M;
+
+  //! do output transform 
+  fp16 z0, z1, z4;
+  for (int w = 0; w < TILE_IN_W; ++w) {
+    z4 = lds.Y[0][w][local_oc_idx][local_tile_idx];
+    z0 =  z4;
+
+    z4 = lds.Y[1][w][local_oc_idx][local_tile_idx];
+    z0 += z4;
+    z1 =  z4;
+    
+    z4 = lds.Y[2][w][local_oc_idx][local_tile_idx];
+    z0 +=  z4;
+    z1 += -z4;
+
+    z4 = lds.Y[3][w][local_oc_idx][local_tile_idx];
+    z1 += -z4;
+
+
+    lds.Y[0][w][local_oc_idx][local_tile_idx] = z0;
+    lds.Y[1][w][local_oc_idx][local_tile_idx] = z1;
+  }
+
+  for (int h = 0; h < TILE_OUT_H; ++h) {
+    z4 = lds.Y[h][0][local_oc_idx][local_tile_idx];
+    z0 =  z4;
+
+    z4 = lds.Y[h][1][local_oc_idx][local_tile_idx];
+    z0 += z4;
+    z1 =  z4;
+
+    z4 = lds.Y[h][2][local_oc_idx][local_tile_idx];
+    z0 +=  z4;
+    z1 += -z4;
+
+    z4 = lds.Y[h][3][local_oc_idx][local_tile_idx];
+    z1 += -z4;
+
+    int oc = oc_blk + local_oc_idx;
+    int tile = tile_blk + local_tile_idx;
+    if(oc < os.oc && tile < ts.numTileTotal) {
+      TileIndex ti = getTileIndex(tile, ts);
+      int n = ti.b, tw = ti.tw, th = ti.th;
+      if(th * TILE_OUT_H + h < os.h && tw * TILE_OUT_W + 0 < os.w)
+        output[n][oc][th * TILE_OUT_H + h][tw * TILE_OUT_W + 0] = (_Float16) z0;
+      if(th * TILE_OUT_H + h < os.h && tw * TILE_OUT_W + 1 < os.w)
+        output[n][oc][th * TILE_OUT_H + h][tw * TILE_OUT_W + 1] = (_Float16) z1;
+    }
+  }
+}
+
+void winograd_2x3_fused(const void* param_ptr) {
+    // std::cout << "winograd_2x3_fused" << std::endl;
+    const mykernelParamType* param = (const mykernelParamType*)param_ptr;
+    _Float16* filter_d = param->pweight;
+    _Float16* image_d  = param->pin;
+    _Float16* out_d    = param->pout;
+    uint64_t padding_h = param->p;
+    uint64_t padding_w = param->q;
+
+    ImgShape  is = {param->n, param->c, param->h, param->w};
+    FltShape  fs = {param->k, param->c, param->r, param->s};
+    OutShape  os = getOutShape(is, fs, padding_h, padding_w);
+    TileShape ts = getTileShape(os);
+
+    const int blk_m = 32;
+    const int blk_n = 32;
+    const int blk_k = 16;
+    dim3 gridDim(DIV_UP(ts.numTileTotal, blk_m), DIV_UP(fs.oc, blk_n), 1), blockDim(blk_m * blk_k, 2);
+    winograd_2x3_kernel<blk_m, blk_n, blk_k><<<gridDim, blockDim, 0, hipStreamDefault>>>(filter_d, fs, image_d, is, padding_h, padding_w, out_d, os, ts);   
+    HIP_CHECK_KERNEL("Kernel panic!!!");
+}
+

@@ -5,22 +5,11 @@
 #include <stdint.h>
 #include <hip/hip_runtime.h>
 #include <hip/hip_ext.h>
+#include <stdio.h>
+#include <stdint.h>
 
 #define MIN(A, B) (((A) < (B)) ? (A) : (B))
 #define MAX(A, B) (((A) > (B)) ? (A) : (B))
-
-#define FLT_H 3L
-#define FLT_W 3L
-#define FLT_HW 3L
-
-#define TILE_IN_HW 6L
-#define TILE_IN_H 6L
-#define TILE_IN_W 6L
-
-#define TILE_OUT_HW 4L
-#define TILE_OUT_H 4L
-#define TILE_OUT_W 4L
-
 
 #define ROUND(A, B) ((A) / (B) * (B))
 #define ROUND_UP(A, B) (((A) + (B) - 1) / (B) * (B))
@@ -30,6 +19,7 @@
 #define DIV(A, B) ((A) / (B))
 #define DIV_UP(A, B) (((A) + (B) - 1) / (B))
 
+#define L2_CACHE_SIZE 8UL * 1024UL * 1024UL
 
 typedef struct {
   uint64_t b;
@@ -157,10 +147,10 @@ typedef struct mykernelParamType
   _Float16*   pweight;                        //权值数据地址
   _Float16*   pout;                           //输出数据地址
 
-  _Float16*   U_d = NULL;
-  _Float16*   V_d = NULL;
-  _Float16*   M_d = NULL;
-  _Float16*   Y_d = NULL;
+  _Float16*   U_d;
+  _Float16*   V_d;
+  _Float16*   M_d;
+  _Float16*   Y_d;
 
   unsigned int      n;                              //batch szie            
   unsigned int      c;                              //channel number        
@@ -176,7 +166,8 @@ typedef struct mykernelParamType
   unsigned int      Oh;                             //卷积在高方向上输出大小    
   unsigned int      Ow;                             //卷积在宽方向上输出大小
 
-  winograd_select   kernel;                     //kernel type
+  winograd_select   kernel;                    
+                                                    //kernel type
 
   ~mykernelParamType() { if(U_d) hipFree(this->U_d); }
 }mykernelParamType;                          
