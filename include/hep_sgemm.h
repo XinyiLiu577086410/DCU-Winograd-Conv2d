@@ -373,7 +373,7 @@ gemm_batched_general_kernel_tensorcore_32x32x16_fp16fp32_Akxm_Bnxk_Cnxm
 template <int  BLK_M,
           int  BLK_N,
           int  BLK_K>
-static __global__ __launch_bounds__(HEP_WARP_SIZE * 2) void
+static __global__ __launch_bounds__(HEP_WARP_SIZE) void
 gemm_batched_kernel_tensorcore_32x32x16_fp16fp32_Akxm_Bnxk_Cnxm
                    (int32_t    M,
                     int32_t    N,
@@ -512,7 +512,7 @@ static void hep_sgemm(int32_t       m,
         const int blk_m = 32;
         const int blk_n = 32;
         const int blk_k = 16;
-        dim3      dimBlock(HEP_WARP_SIZE, 2);
+        dim3      dimBlock(HEP_WARP_SIZE);
         dim3      dimGrid(m / blk_m, n / blk_n, batch_count);
         gemm_batched_kernel_tensorcore_32x32x16_fp16fp32_Akxm_Bnxk_Cnxm<blk_m, blk_n, blk_k><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
     }

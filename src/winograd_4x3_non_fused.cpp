@@ -426,14 +426,14 @@ __global__ void output_transform(void* __restrict__    M_,
     TileIndex ti = getTileIndex(b, ts);
     int n = ti.b, tw = ti.tw, th = ti.th;
 
-    if(th * 4 + h < os.h && tw * 4 + 0 < os.w)
-      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 0)] = (fp16) z0;
-    if(th * 4 + h < os.h && tw * 4 + 1 < os.w)
-      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 1)] = (fp16) z1;
-    if(th * 4 + h < os.h && tw * 4 + 2 < os.w)
-      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 2)] = (fp16) z2;
-    if(th * 4 + h < os.h && tw * 4 + 3 < os.w)
-      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * 4 + h) * os.w + (tw * 4 + 3)] = (fp16) z3;
+    if(th * TILE_OUT_H + h < os.h && tw * TILE_OUT_W + 0 < os.w)
+      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * TILE_OUT_H + h) * os.w + (tw * TILE_OUT_W + 0)] = (fp16) z0;
+    if(th * TILE_OUT_H + h < os.h && tw * TILE_OUT_W + 1 < os.w)
+      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * TILE_OUT_H + h) * os.w + (tw * TILE_OUT_W + 1)] = (fp16) z1;
+    if(th * TILE_OUT_H + h < os.h && tw * TILE_OUT_W + 2 < os.w)
+      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * TILE_OUT_H + h) * os.w + (tw * TILE_OUT_W + 2)] = (fp16) z2;
+    if(th * TILE_OUT_H + h < os.h && tw * TILE_OUT_W + 3 < os.w)
+      out[n * os.oc * os.h * os.w + k * os.h * os.w + (th * TILE_OUT_H + h) * os.w + (tw * TILE_OUT_W + 3)] = (fp16) z3;
   }
 }
 
