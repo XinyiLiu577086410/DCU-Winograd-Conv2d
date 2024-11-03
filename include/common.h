@@ -7,6 +7,7 @@
 #include <hip/hip_ext.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <iostream>
 
 #define MIN(A, B) (((A) < (B)) ? (A) : (B))
 #define MAX(A, B) (((A) > (B)) ? (A) : (B))
@@ -138,6 +139,7 @@ union RegisterUnion
 
 enum winograd_select {
   select_4x3_non_fused,
+  select_2x3_non_fused,
   select_2x3_fused
 };
 

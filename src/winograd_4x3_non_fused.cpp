@@ -11,7 +11,7 @@
 template <typename inoutT, 
           typename calcT,
           size_t   work_group_size>
-__global__ void input_transform_collapsed_ic_x_tile
+__global__ static void input_transform_collapsed_ic_x_tile
                             (fp16*     __restrict__ image, 
                              ImgShape               is,  
                              void*     __restrict__ V_, 
@@ -148,7 +148,7 @@ template <typename inoutT,
           int      IC_BLK,
           int      OC_BLK>
 __global__ __launch_bounds__(OC_BLK * IC_BLK)  
-void filter_transform_2_dims_transpose( fp16*     __restrict__ filter_, 
+static void filter_transform_2_dims_transpose( fp16*     __restrict__ filter_, 
                                         void*     __restrict__ U_,
                                         UShape                 us ) 
 {
@@ -242,7 +242,7 @@ void filter_transform_2_dims_transpose( fp16*     __restrict__ filter_,
 template <typename inoutT, 
           typename calcT, 
           int work_group_size>
-__global__ void filter_transform_no_transpose(fp16*     __restrict__ filter, 
+__global__ static void filter_transform_no_transpose(fp16*     __restrict__ filter, 
                                               void*     __restrict__ U_,
                                               UShape                 us, 
                                               int                    simdDimSize) 
@@ -324,7 +324,7 @@ __global__ void filter_transform_no_transpose(fp16*     __restrict__ filter,
 template <typename inoutT, 
           typename calcT,
           int work_group_size>
-__global__ void output_transform(void* __restrict__    M_, 
+__global__ static void output_transform(void* __restrict__    M_, 
                                  int                   simdDimSize,
                                  fp16*    __restrict__ out, 
                                  OutShape              os,  
@@ -457,13 +457,9 @@ void winograd_4x3_none_fused(const void* param_ptr) {
     UShape    us = getUShape(fs);
     VShape    vs = getVShape(is, ts);
   
-    const size_t work_group_size = 64;
+    const size_t work_group_size = HEP_WARP_SIZE;
     input_transform_collapsed_ic_x_tile <fp16, fp16, work_group_size> <<< vs.ic * vs.numTileTotal / work_group_size, work_group_size >>> (image_d, is, V_d, vs, vs.ic * vs.numTileTotal, ts, padding_h, padding_w);
     HIP_CHECK_KERNEL("Kernel panic!!!");
-    const int blk_oc = 16;
-    const int blk_ic = 16;
-    dim3 block_dim(blk_ic, blk_oc);
-    dim3 grid_dim(DIV_UP(us.ic , blk_ic), DIV_UP(us.oc, blk_oc));
     filter_transform_no_transpose <fp16, fp16, work_group_size> <<<DIV_UP(us.ic * us.oc, work_group_size), work_group_size>>> (filter_d, U_d, us, us.ic * us.oc);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
     const float alpha = 1.0, beta = 0.0;

@@ -1,12 +1,13 @@
 #include "conv2d.h"
 
-#define FLT_H      3L
-#define FLT_W      3L
-#define TILE_IN_H  6L
-#define TILE_IN_W  6L
-#define TILE_OUT_H 4L
-#define TILE_OUT_W 4L
-/* Above macros must be defined before include common.h */
+static long FLT_H      = 3L;
+static long FLT_W      = 3L;
+static long TILE_IN_H  = 6L;
+static long TILE_IN_W  = 6L;
+static long TILE_OUT_H = 4L;
+static long TILE_OUT_W = 4L;
+
+/* Above variables must be defined before include common.h */
 #include "common.h"
 #include "winograd.h"
 /*选手自定义的kernel入参结构体*/
@@ -67,7 +68,7 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
   pArgs->Ow = outw;
 
   ImgShape  is = {n, c, h, w};
-  FltShape  fs = {k, c, FLT_H, FLT_W};
+  FltShape  fs = {k, c, uint64_t(FLT_H), uint64_t(FLT_W)};
   OutShape  os = {n, k, outh, outw};
   TileShape ts = getTileShape(os);
   UShape    us = getUShape(fs);
@@ -82,7 +83,28 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
   if(image_size * sizeof(fp16) >= 2 * L2_CACHE_SIZE) {
     pArgs->U_d = NULL;
     pArgs->kernel = winograd_select::select_2x3_fused;
-  } else {
+  }
+  else if(U_size > 4 * V_size) 
+  {
+    ::TILE_IN_H  = 4L;
+    ::TILE_IN_W  = 4L;
+    ::TILE_OUT_H = 2L;
+    ::TILE_OUT_W = 2L;
+    TileShape ts_ = getTileShape(os);
+    UShape    us_ = getUShape(fs);
+    VShape    vs_ = getVShape(is, ts_);
+    unsigned int U_size_ = TILE_IN_H * TILE_IN_W * k * c;
+    unsigned int V_size_ = TILE_IN_H * TILE_IN_W * vs_.numTileTotal * c;
+    unsigned int M_size_ = TILE_IN_H * TILE_IN_W * k * vs_.numTileTotal;
+    unsigned int malloc_size = sizeof(fp16) * (U_size_ + V_size_ + M_size_);
+    hipMalloc(&pArgs->U_d, malloc_size);
+    pArgs->V_d = pArgs->U_d + U_size_;
+    pArgs->M_d = pArgs->V_d + V_size_;
+    pArgs->Y_d = pArgs->M_d + M_size_;
+    pArgs->kernel = winograd_select::select_2x3_non_fused;
+  }
+  else
+  {
     unsigned int malloc_size = sizeof(fp16) * (U_size + V_size + M_size);
     hipMalloc(&pArgs->U_d, malloc_size);
     pArgs->V_d = pArgs->U_d + U_size;
@@ -98,6 +120,9 @@ extern "C" void conv2d_fp16(const void* param_ptr) {
   switch(param->kernel) {
     case winograd_select::select_4x3_non_fused:
       winograd_4x3_none_fused(param_ptr);
+      break;
+    case winograd_select::select_2x3_non_fused:
+      winograd_2x3_none_fused(param_ptr);
       break;
     case winograd_select::select_2x3_fused:
       winograd_2x3_fused(param_ptr);
