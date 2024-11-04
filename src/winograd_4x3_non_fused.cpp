@@ -24,6 +24,10 @@ __global__ static void input_transform_collapsed_ic_x_tile
   auto V = reinterpret_cast<inoutT*>(V_);
   __shared__ calcT tmp[work_group_size][TILE_IN_H][TILE_IN_W];
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (idx >= simdDimSize) 
+    return;
+
   int itx = threadIdx.x;
   calcT z0, z1, z2, z3, z4, z5, z6;
 
@@ -140,102 +144,6 @@ __global__ static void input_transform_collapsed_ic_x_tile
     V[h * TILE_IN_W * simdDimSize + 4 * simdDimSize + idx] = z4;
     V[h * TILE_IN_W * simdDimSize + 5 * simdDimSize + idx] = z5;
   }
-
-}
-
-template <typename inoutT, 
-          typename calcT , 
-          int      IC_BLK,
-          int      OC_BLK>
-__global__ __launch_bounds__(OC_BLK * IC_BLK)  
-static void filter_transform_2_dims_transpose( fp16*     __restrict__ filter_, 
-                                        void*     __restrict__ U_,
-                                        UShape                 us ) 
-{
-  static_assert(OC_BLK == IC_BLK);
-  auto filter = reinterpret_cast<inoutT(*)[us.ic][FLT_H][FLT_W]>(filter_);
-  auto U = reinterpret_cast<inoutT(*)[TILE_IN_W][us.ic][us.oc]>(U_);
-  __shared__ calcT tmp[IC_BLK][OC_BLK][TILE_IN_H][TILE_IN_W];
-  const int oc_local = threadIdx.y;  // thread's index on OC
-  const int ic_local = threadIdx.x;  // thread's index on IC
-  const int oc_blk   = blockIdx.y;   // workgroup's index on OC
-  const int ic_blk   = blockIdx.x;   // workgroup's index on IC
-  calcT z0, z1, z2, z3, z4, z5, z6;
-
-  for(int w = 0; w < FLT_W; ++w)
-    for(int h = 0; h < FLT_H; ++h)
-      if(oc_blk * OC_BLK + oc_local < us.oc && ic_blk * IC_BLK + ic_local < us.ic)
-        tmp[ic_local][oc_local][h][w] = filter[oc_blk * OC_BLK + oc_local][ic_blk * IC_BLK + ic_local][h][w];
-  
-  __syncthreads();
-  
-  for (int w = 0; w < FLT_H; ++w) {
-    z6 = tmp[ic_local][oc_local][0][w];
-
-    z0 = ((calcT)( 1.0f / 4.0f )) * z6;
-    z1 = ((calcT)(-1.0f / 6.0f )) * z6;
-    z2 = ((calcT)(-1.0f / 6.0f )) * z6;
-    z3 = ((calcT)( 1.0f / 24.0f)) * z6;
-    z4 = ((calcT)( 1.0f / 24.0f)) * z6;
-
-    z6 = tmp[ic_local][oc_local][1][w];
-
-    z1 += ((calcT)(-1.0f / 6.0f )) * z6;
-    z2 += ((calcT)( 1.0f / 6.0f )) * z6;
-    z3 += ((calcT)( 1.0f / 12.0f)) * z6;
-    z4 += ((calcT)(-1.0f / 12.0f)) * z6;
-
-    z6 = tmp[ic_local][oc_local][2][w];
-
-    z1 += ((calcT)(-1.0f / 6.0f)) * z6;
-    z2 += ((calcT)(-1.0f / 6.0f)) * z6;
-    z3 += ((calcT)( 1.0f / 6.0f)) * z6;
-    z4 += ((calcT)( 1.0f / 6.0f)) * z6;
-    z5 = z6;
-
-    tmp[ic_local][oc_local][0][w] = z0;
-    tmp[ic_local][oc_local][1][w] = z1;
-    tmp[ic_local][oc_local][2][w] = z2;
-    tmp[ic_local][oc_local][3][w] = z3;
-    tmp[ic_local][oc_local][4][w] = z4;
-    tmp[ic_local][oc_local][5][w] = z5;
-  }
-
-  for (int h = 0; h < TILE_IN_H; ++h) {
-    z6 = tmp[ic_local][oc_local][h][0];
-
-    z0 = ((calcT)( 1.0f / 4.0f )) * z6;
-    z1 = ((calcT)(-1.0f / 6.0f )) * z6;
-    z2 = ((calcT)(-1.0f / 6.0f )) * z6;
-    z3 = ((calcT)( 1.0f / 24.0f)) * z6;
-    z4 = ((calcT)( 1.0f / 24.0f)) * z6;
-
-    z6 = tmp[ic_local][oc_local][h][1];
-
-    z1 += ((calcT)(-1.0f / 6.0f )) * z6;
-    z2 += ((calcT)( 1.0f / 6.0f )) * z6;
-    z3 += ((calcT)( 1.0f / 12.0f)) * z6;
-    z4 += ((calcT)(-1.0f / 12.0f)) * z6;
-
-    z6 = tmp[ic_local][oc_local][h][2];
-
-    z1 += ((calcT)(-1.0f / 6.0f)) * z6;
-    z2 += ((calcT)(-1.0f / 6.0f)) * z6;
-    z3 += ((calcT)( 1.0f / 6.0f)) * z6;
-    z4 += ((calcT)( 1.0f / 6.0f)) * z6;
-    z5 = z6;
-
-    if(oc_blk * OC_BLK + oc_local < us.oc && ic_blk * IC_BLK + ic_local < us.ic) {
-      U[h][0][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z0;
-      U[h][1][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z1;
-      U[h][2][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z2;
-      U[h][3][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z3;
-      U[h][4][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z4;
-      U[h][5][ic_blk * IC_BLK + ic_local][oc_blk * OC_BLK + oc_local] = z5;
-    }
-  }
-
-  __syncthreads();
 
 }
 
