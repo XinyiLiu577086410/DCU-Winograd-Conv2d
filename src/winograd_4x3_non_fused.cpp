@@ -333,6 +333,10 @@ __global__ static void output_transform(void* __restrict__    M_,
   auto M = reinterpret_cast<inoutT*>(M_);
   __shared__ calcT tmp[work_group_size][TILE_OUT_H][TILE_IN_W];
   int idx = blockIdx.x * blockDim.x + threadIdx.x; 
+  
+  if (idx >= simdDimSize) 
+    return;
+
   int itx = threadIdx.x;
 
   calcT z0, z1, z2, z3, z4;
@@ -675,9 +679,9 @@ void winograd_4x3_none_fused(const void* param_ptr) {
     UShape    us = getUShape(fs);
     VShape    vs = getVShape(is, ts);
   
-    const size_t work_group_size = HEP_WARP_SIZE; 
-    input_transform_filter_transform <fp16, fp16, work_group_size> <<< DIV_UP(us.ic * us.oc, work_group_size) + DIV_UP(vs.ic * vs.numTileTotal, work_group_size), work_group_size >>>
-                                   (filter_d, U_d, us, us.ic * us.oc, image_d, is, V_d, vs, vs.ic * vs.numTileTotal, ts, padding_h, padding_w, DIV_UP(us.ic * us.oc, work_group_size));
+    const size_t work_group_size_1 = HEP_WARP_SIZE; 
+    input_transform_filter_transform <fp16, fp16, work_group_size_1> <<< DIV_UP(us.ic * us.oc, work_group_size_1) + DIV_UP(vs.ic * vs.numTileTotal, work_group_size_1), work_group_size_1 >>>
+                                   (filter_d, U_d, us, us.ic * us.oc, image_d, is, V_d, vs, vs.ic * vs.numTileTotal, ts, padding_h, padding_w, DIV_UP(us.ic * us.oc, work_group_size_1));
 
     const float alpha = 1.0, beta = 0.0;
     hep_sgemm<fp16, float>( vs.numTileTotal, us.oc, us.ic,
@@ -691,8 +695,9 @@ void winograd_4x3_none_fused(const void* param_ptr) {
                                 vs.numTileTotal,  // if you change M's layout, you need to change this
                                 TILE_IN_H * TILE_IN_W,
                                 hipStreamDefault );
-
-    output_transform <fp16, fp16, work_group_size> <<< us.oc * vs.numTileTotal / work_group_size, work_group_size >>>(M_d, us.oc * vs.numTileTotal, out_d, os, ts);
+    
+    const size_t work_group_size_2 = 4 * HEP_WARP_SIZE; 
+    output_transform <fp16, fp16, work_group_size_2> <<< us.oc * vs.numTileTotal / work_group_size_2, work_group_size_2 >>>(M_d, us.oc * vs.numTileTotal, out_d, os, ts);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
 
 }
