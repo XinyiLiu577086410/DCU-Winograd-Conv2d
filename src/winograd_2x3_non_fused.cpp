@@ -388,6 +388,10 @@ void winograd_2x3_none_fused(const void* param_ptr) {
     VShape    vs = getVShape(is, ts);
   
     const size_t work_group_size = HEP_WARP_SIZE;
+    // input_transform_collapsed_ic_x_tile <fp16, fp16, work_group_size> <<< vs.ic * vs.numTileTotal / work_group_size, work_group_size >>> (image_d, is, V_d, vs, vs.ic * vs.numTileTotal, ts, padding_h, padding_w);
+    // HIP_CHECK_KERNEL("Kernel panic!!!");
+    // filter_transform_no_transpose <fp16, fp16, work_group_size> <<<DIV_UP(us.ic * us.oc, work_group_size), work_group_size>>> (filter_d, U_d, us, us.ic * us.oc);
+    // HIP_CHECK_KERNEL("Kernel panic!!!");  
     input_transform_filter_transform_winograd2x3 <fp16, fp16, work_group_size> <<< DIV_UP(us.ic * us.oc, work_group_size) + DIV_UP(vs.ic * vs.numTileTotal, work_group_size), work_group_size >>> (filter_d, U_d, us, us.ic * us.oc, image_d, is, V_d, vs, vs.ic * vs.numTileTotal, ts, padding_h, padding_w, DIV_UP(us.ic * us.oc, work_group_size));   
     const float alpha = 1.0, beta = 0.0;
     hep_sgemm<fp16, float>( vs.numTileTotal, us.oc, us.ic,
