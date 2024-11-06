@@ -48,7 +48,7 @@ winograd_2x3_kernel(_Float16* filter_d,
   auto filter = (filter_tensor_t) filter_d;
   typedef fp16 (*output_tensor_t) [os.oc][os.h][os.w];
   auto output = (output_tensor_t) out_d;
-  fp32x4 C_reg_acc[4] = {0};
+  fp32x4 C_reg_acc[2][2] = {0};
   int local_oc_idx;
   int local_tile_idx;
   int local_ic_idx;
@@ -200,60 +200,41 @@ winograd_2x3_kernel(_Float16* filter_d,
     int elem_idx = tid / 64;
     int h = elem_idx / TILE_IN_W;
     int w = elem_idx % TILE_IN_W;
-    RegisterUnion frag_AB_0, frag_AB_1;
+    fp16x4 frag_A[2], frag_B[2];
     size_t read_dim_k  = (tid % 64) / (BLK_M / 2) * 4;
     size_t read_dim_mn = (tid % 64) % (BLK_M / 2);
-    frag_AB_0.vector_front = {lds.V[h][w][read_dim_k + 0][read_dim_mn], 
-                              lds.V[h][w][read_dim_k + 1][read_dim_mn], 
-                              lds.V[h][w][read_dim_k + 2][read_dim_mn], 
-                              lds.V[h][w][read_dim_k + 3][read_dim_mn]};
-    frag_AB_0.vector_rear  = {lds.U[h][w][read_dim_k + 0][read_dim_mn], 
-                              lds.U[h][w][read_dim_k + 1][read_dim_mn], 
-                              lds.U[h][w][read_dim_k + 2][read_dim_mn], 
-                              lds.U[h][w][read_dim_k + 3][read_dim_mn]};
+    frag_A[0] = {lds.V[h][w][read_dim_k + 0][read_dim_mn], 
+                 lds.V[h][w][read_dim_k + 1][read_dim_mn], 
+                 lds.V[h][w][read_dim_k + 2][read_dim_mn], 
+                 lds.V[h][w][read_dim_k + 3][read_dim_mn]};
+    frag_B[0] = {lds.U[h][w][read_dim_k + 0][read_dim_mn], 
+                 lds.U[h][w][read_dim_k + 1][read_dim_mn], 
+                 lds.U[h][w][read_dim_k + 2][read_dim_mn], 
+                 lds.U[h][w][read_dim_k + 3][read_dim_mn]};
     read_dim_mn += 16;
-    frag_AB_1.vector_front = {lds.V[h][w][read_dim_k + 0][read_dim_mn], 
-                              lds.V[h][w][read_dim_k + 1][read_dim_mn], 
-                              lds.V[h][w][read_dim_k + 2][read_dim_mn], 
-                              lds.V[h][w][read_dim_k + 3][read_dim_mn]};
-    frag_AB_1.vector_rear  = {lds.U[h][w][read_dim_k + 0][read_dim_mn], 
-                              lds.U[h][w][read_dim_k + 1][read_dim_mn], 
-                              lds.U[h][w][read_dim_k + 2][read_dim_mn], 
-                              lds.U[h][w][read_dim_k + 3][read_dim_mn]};
+    frag_A[1] = {lds.V[h][w][read_dim_k + 0][read_dim_mn], 
+                 lds.V[h][w][read_dim_k + 1][read_dim_mn], 
+                 lds.V[h][w][read_dim_k + 2][read_dim_mn], 
+                 lds.V[h][w][read_dim_k + 3][read_dim_mn]};
+    frag_B[1] = {lds.U[h][w][read_dim_k + 0][read_dim_mn], 
+                 lds.U[h][w][read_dim_k + 1][read_dim_mn], 
+                 lds.U[h][w][read_dim_k + 2][read_dim_mn], 
+                 lds.U[h][w][read_dim_k + 3][read_dim_mn]};
     asm volatile("s_waitcnt lgkmcnt(0)\n\t");
-
-    asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[0]), "+v"(frag_AB_0.vector_front), "+v"(frag_AB_0.vector_rear));
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-
-    asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[1]), "+v"(frag_AB_0.vector_front), "+v"(frag_AB_1.vector_rear));
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-
-    asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[2]), "+v"(frag_AB_1.vector_front), "+v"(frag_AB_0.vector_rear));
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-
-    asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[3]), "+v"(frag_AB_1.vector_front), "+v"(frag_AB_1.vector_rear));
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-    asm volatile("s_nop 8\n\t");
-
+    #define NOP_48_CYCLES() asm volatile("s_nop 8\n\t"); \
+                            asm volatile("s_nop 8\n\t"); \
+                            asm volatile("s_nop 8\n\t"); \
+                            asm volatile("s_nop 8\n\t"); \
+                            asm volatile("s_nop 8\n\t"); \
+                            asm volatile("s_nop 8\n\t");
+    asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[0][0]), "+v"(frag_A[0]), "+v"(frag_B[0]));
+    NOP_48_CYCLES();
+    asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[0][1]), "+v"(frag_A[0]), "+v"(frag_B[1]));
+    NOP_48_CYCLES();
+    asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[1][0]), "+v"(frag_A[1]), "+v"(frag_B[0]));
+    NOP_48_CYCLES();
+    asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[1][1]), "+v"(frag_A[1]), "+v"(frag_B[1]));
+    NOP_48_CYCLES();
   } //! end for ic_blk = 0 to K by BLK_K
 
 
@@ -265,25 +246,25 @@ winograd_2x3_kernel(_Float16* filter_d,
   int w = elem_idx % TILE_IN_W;
   size_t write_local_tile = (tid % 64) % (BLK_M / 2);
   size_t write_local_oc   = (tid % 64) / (BLK_M / 2);
-  lds.Y[h][w][write_local_oc +  0 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0].x;
-  lds.Y[h][w][write_local_oc +  4 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0].y;
-  lds.Y[h][w][write_local_oc +  8 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0].z;
-  lds.Y[h][w][write_local_oc + 12 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0].w;
+  lds.Y[h][w][write_local_oc +  0 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0][0].x;
+  lds.Y[h][w][write_local_oc +  4 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0][0].y;
+  lds.Y[h][w][write_local_oc +  8 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0][0].z;
+  lds.Y[h][w][write_local_oc + 12 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0][0].w;
 
-  lds.Y[h][w][write_local_oc +  0 + 16][write_local_tile +  0] = (_Float16)C_reg_acc[1].x;
-  lds.Y[h][w][write_local_oc +  4 + 16][write_local_tile +  0] = (_Float16)C_reg_acc[1].y;
-  lds.Y[h][w][write_local_oc +  8 + 16][write_local_tile +  0] = (_Float16)C_reg_acc[1].z;
-  lds.Y[h][w][write_local_oc + 12 + 16][write_local_tile +  0] = (_Float16)C_reg_acc[1].w;
+  lds.Y[h][w][write_local_oc +  0 + 16][write_local_tile +  0] = (_Float16)C_reg_acc[0][1].x;
+  lds.Y[h][w][write_local_oc +  4 + 16][write_local_tile +  0] = (_Float16)C_reg_acc[0][1].y;
+  lds.Y[h][w][write_local_oc +  8 + 16][write_local_tile +  0] = (_Float16)C_reg_acc[0][1].z;
+  lds.Y[h][w][write_local_oc + 12 + 16][write_local_tile +  0] = (_Float16)C_reg_acc[0][1].w;
 
-  lds.Y[h][w][write_local_oc +  0 +  0][write_local_tile + 16] = (_Float16)C_reg_acc[2].x;
-  lds.Y[h][w][write_local_oc +  4 +  0][write_local_tile + 16] = (_Float16)C_reg_acc[2].y;
-  lds.Y[h][w][write_local_oc +  8 +  0][write_local_tile + 16] = (_Float16)C_reg_acc[2].z;
-  lds.Y[h][w][write_local_oc + 12 +  0][write_local_tile + 16] = (_Float16)C_reg_acc[2].w;
+  lds.Y[h][w][write_local_oc +  0 +  0][write_local_tile + 16] = (_Float16)C_reg_acc[1][0].x;
+  lds.Y[h][w][write_local_oc +  4 +  0][write_local_tile + 16] = (_Float16)C_reg_acc[1][0].y;
+  lds.Y[h][w][write_local_oc +  8 +  0][write_local_tile + 16] = (_Float16)C_reg_acc[1][0].z;
+  lds.Y[h][w][write_local_oc + 12 +  0][write_local_tile + 16] = (_Float16)C_reg_acc[1][0].w;
 
-  lds.Y[h][w][write_local_oc +  0 + 16][write_local_tile + 16] = (_Float16)C_reg_acc[3].x;
-  lds.Y[h][w][write_local_oc +  4 + 16][write_local_tile + 16] = (_Float16)C_reg_acc[3].y;
-  lds.Y[h][w][write_local_oc +  8 + 16][write_local_tile + 16] = (_Float16)C_reg_acc[3].z;
-  lds.Y[h][w][write_local_oc + 12 + 16][write_local_tile + 16] = (_Float16)C_reg_acc[3].w;
+  lds.Y[h][w][write_local_oc +  0 + 16][write_local_tile + 16] = (_Float16)C_reg_acc[1][1].x;
+  lds.Y[h][w][write_local_oc +  4 + 16][write_local_tile + 16] = (_Float16)C_reg_acc[1][1].y;
+  lds.Y[h][w][write_local_oc +  8 + 16][write_local_tile + 16] = (_Float16)C_reg_acc[1][1].z;
+  lds.Y[h][w][write_local_oc + 12 + 16][write_local_tile + 16] = (_Float16)C_reg_acc[1][1].w;
 
   __syncthreads();
   
