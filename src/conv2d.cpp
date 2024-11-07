@@ -80,7 +80,7 @@ int getkernelInfo(__in__ problem_t* problem, __out__  kernelInfo_t* kernelInfo, 
   unsigned int U_size = TILE_IN_H * TILE_IN_W * k * c;
   unsigned int V_size = TILE_IN_H * TILE_IN_W * vs.numTileTotal * c;
   unsigned int M_size = TILE_IN_H  * TILE_IN_W  * k * vs.numTileTotal;
-  if(image_size * sizeof(fp16) >= 2 * L2_CACHE_SIZE) {
+  if(image_size >= 10 * filter_size) {
     pArgs->U_d = NULL;
     pArgs->kernel = winograd_select::select_2x3_fused;
   }

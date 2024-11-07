@@ -65,31 +65,25 @@ winograd_2x3_kernel(_Float16* filter_d,
       local_ic_idx   = thx % BLK_K;
       local_oc_idx   = thx / BLK_K;
       // ! read filter slice from global memory into shared memory
+      typedef fp16 filter_tile_t __attribute__((ext_vector_type(9)));
+      filter_tile_t filter_tile = {0};
       if(oc_blk + local_oc_idx < fs.oc)
         if(ic_blk + local_ic_idx < fs.ic)
-          for(int h = 0; h < FLT_H; ++h)
-            for(int w = 0; w < FLT_W; ++w)
-                lds.U[h][w][local_ic_idx][local_oc_idx] = filter[oc_blk + local_oc_idx][ic_blk + local_ic_idx][h][w];
-        else 
-          for(int h = 0; h < FLT_H; ++h)
-            for(int w = 0; w < FLT_W; ++w)
-                lds.U[h][w][local_ic_idx][local_oc_idx] = 0;
+          filter_tile = *(filter_tile_t*)&filter[oc_blk + local_oc_idx][ic_blk + local_ic_idx][0][0];
 
       //! filter transform
       for (int w = 0; w < FLT_W; ++w) {
-        z6 = lds.U[0][w][local_ic_idx][local_oc_idx];
-
+        z6 = filter_tile[w + 0 * FLT_W];
         z0 = ((fp16)( 1.0f )) * z6;
         z1 = ((fp16)( 1.0f / 2.0f )) * z6;
         z2 = ((fp16)( 1.0f / 2.0f )) * z6;
 
-        z6 = lds.U[1][w][local_ic_idx][local_oc_idx];
+        z6 = filter_tile[w + 1 * FLT_W];
 
         z1 += ((fp16)( 1.0f / 2.0f )) * z6;
         z2 += ((fp16)(-1.0f / 2.0f )) * z6;
 
-
-        z6 = lds.U[2][w][local_ic_idx][local_oc_idx];
+        z6 = filter_tile[w + 2 * FLT_W];
 
         z1 += ((fp16)( 1.0f / 2.0f )) * z6;
         z2 += ((fp16)( 1.0f / 2.0f )) * z6;
@@ -129,36 +123,48 @@ winograd_2x3_kernel(_Float16* filter_d,
     if(thy == 0) { // must be 0 not 1
       local_tile_idx = thx % BLK_M;
       local_ic_idx   = thx / BLK_M;
-
+      fp16x4 img_tile[TILE_IN_H];
       //! read image slice from global memory into shared memory
-      if(tile_blk + local_tile_idx < ts.numTileTotal) {
+      if(tile_blk + local_tile_idx < ts.numTileTotal && ic_blk + local_ic_idx < is.ic) {
         const TileIndex ti = getTileIndex(tile_blk + local_tile_idx, ts);
         const uint64_t b = ti.b, th = ti.th, tw = ti.tw;
         for(int h = 0; h < TILE_IN_H; ++h)
-          for(int w = 0; w < TILE_IN_W; ++w)
-            if(th * TILE_OUT_H + h - padding_h < is.h && tw * TILE_OUT_W + w - padding_w < is.w && ic_blk + local_ic_idx < is.ic) {
-              lds.V[h][w][local_ic_idx][local_tile_idx] = image[b][ic_blk + local_ic_idx][th * TILE_OUT_H + h - padding_h][tw * TILE_OUT_W + w - padding_w];
-            } else {
-              lds.V[h][w][local_ic_idx][local_tile_idx] = 0;
-            }
+        {
+          if(th * TILE_OUT_H + h - padding_h < is.h) 
+          {
+              img_tile[h][0] = (tw * TILE_OUT_W + 0 - padding_w < is.w)
+                                ? image[b][ic_blk + local_ic_idx][th * TILE_OUT_H + h - padding_h][tw * TILE_OUT_W + 0 - padding_w] : 0;
+              img_tile[h][1] = (tw * TILE_OUT_W + 1 - padding_w < is.w)
+                                ? image[b][ic_blk + local_ic_idx][th * TILE_OUT_H + h - padding_h][tw * TILE_OUT_W + 1 - padding_w] : 0;
+              img_tile[h][2] = (tw * TILE_OUT_W + 2 - padding_w < is.w)
+                                ? image[b][ic_blk + local_ic_idx][th * TILE_OUT_H + h - padding_h][tw * TILE_OUT_W + 2 - padding_w] : 0;
+              img_tile[h][3] = (tw * TILE_OUT_W + 3 - padding_w < is.w)
+                                ? image[b][ic_blk + local_ic_idx][th * TILE_OUT_H + h - padding_h][tw * TILE_OUT_W + 3 - padding_w] : 0;
+          }
+        }
       }
-
+      else 
+      {
+        for(int h = 0; h < TILE_IN_H; ++h)
+          for(int w = 0; w < TILE_IN_W; ++w)
+            img_tile[h][w] = 0;
+      }
       //！image transform
       for (int w = 0; w < TILE_IN_W; ++w) {
-        z6 = lds.V[0][w][local_ic_idx][local_tile_idx];
+        z6 = img_tile[0][w];
         z0 = ((fp16) 1.0f) * z6;
 
-        z6 = lds.V[1][w][local_ic_idx][local_tile_idx];
+        z6 = img_tile[1][w];
         z1 = ((fp16) 1.0f) * z6;
         z2 = ((fp16)-1.0f) * z6;
         z3 = ((fp16) 1.0f) * z6;
 
-        z6 = lds.V[2][w][local_ic_idx][local_tile_idx];
+        z6 = img_tile[2][w];
         z0 += ((fp16)-1.0f) * z6;
         z1 += ((fp16) 1.0f) * z6;
         z2 += ((fp16) 1.0f) * z6;
 
-        z6 = lds.V[3][w][local_ic_idx][local_tile_idx];
+        z6 = img_tile[3][w];
         z3 += ((fp16)-1.0f) * z6;
 
         lds.V[0][w][local_ic_idx][local_tile_idx] = z0;
@@ -203,30 +209,32 @@ winograd_2x3_kernel(_Float16* filter_d,
     fp16x4 frag_A[2], frag_B[2];
     size_t read_dim_k  = (tid % 64) / (BLK_M / 2) * 4;
     size_t read_dim_mn = (tid % 64) % (BLK_M / 2);
-    frag_A[0] = {lds.V[h][w][read_dim_k + 0][read_dim_mn], 
-                 lds.V[h][w][read_dim_k + 1][read_dim_mn], 
-                 lds.V[h][w][read_dim_k + 2][read_dim_mn], 
-                 lds.V[h][w][read_dim_k + 3][read_dim_mn]};
-    frag_B[0] = {lds.U[h][w][read_dim_k + 0][read_dim_mn], 
-                 lds.U[h][w][read_dim_k + 1][read_dim_mn], 
-                 lds.U[h][w][read_dim_k + 2][read_dim_mn], 
-                 lds.U[h][w][read_dim_k + 3][read_dim_mn]};
+    frag_A[0] = { lds.V[h][w][read_dim_k + 0][read_dim_mn], 
+                  lds.V[h][w][read_dim_k + 1][read_dim_mn], 
+                  lds.V[h][w][read_dim_k + 2][read_dim_mn], 
+                  lds.V[h][w][read_dim_k + 3][read_dim_mn] };
+    frag_B[0] = { lds.U[h][w][read_dim_k + 0][read_dim_mn], 
+                  lds.U[h][w][read_dim_k + 1][read_dim_mn], 
+                  lds.U[h][w][read_dim_k + 2][read_dim_mn], 
+                  lds.U[h][w][read_dim_k + 3][read_dim_mn] };
     read_dim_mn += 16;
-    frag_A[1] = {lds.V[h][w][read_dim_k + 0][read_dim_mn], 
-                 lds.V[h][w][read_dim_k + 1][read_dim_mn], 
-                 lds.V[h][w][read_dim_k + 2][read_dim_mn], 
-                 lds.V[h][w][read_dim_k + 3][read_dim_mn]};
-    frag_B[1] = {lds.U[h][w][read_dim_k + 0][read_dim_mn], 
-                 lds.U[h][w][read_dim_k + 1][read_dim_mn], 
-                 lds.U[h][w][read_dim_k + 2][read_dim_mn], 
-                 lds.U[h][w][read_dim_k + 3][read_dim_mn]};
+    frag_A[1] = { lds.V[h][w][read_dim_k + 0][read_dim_mn], 
+                  lds.V[h][w][read_dim_k + 1][read_dim_mn], 
+                  lds.V[h][w][read_dim_k + 2][read_dim_mn], 
+                  lds.V[h][w][read_dim_k + 3][read_dim_mn] };
+    frag_B[1] = { lds.U[h][w][read_dim_k + 0][read_dim_mn], 
+                  lds.U[h][w][read_dim_k + 1][read_dim_mn], 
+                  lds.U[h][w][read_dim_k + 2][read_dim_mn], 
+                  lds.U[h][w][read_dim_k + 3][read_dim_mn] };
     asm volatile("s_waitcnt lgkmcnt(0)\n\t");
+
     #define NOP_48_CYCLES() asm volatile("s_nop 8\n\t"); \
                             asm volatile("s_nop 8\n\t"); \
                             asm volatile("s_nop 8\n\t"); \
                             asm volatile("s_nop 8\n\t"); \
                             asm volatile("s_nop 8\n\t"); \
                             asm volatile("s_nop 8\n\t");
+
     asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[0][0]), "+v"(frag_A[0]), "+v"(frag_B[0]));
     NOP_48_CYCLES();
     asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[0][1]), "+v"(frag_A[0]), "+v"(frag_B[1]));
@@ -321,6 +329,7 @@ winograd_2x3_kernel(_Float16* filter_d,
     }
   }
 }
+
 
 void winograd_2x3_fused(const void* param_ptr) {
     // std::cout << "winograd_2x3_fused" << std::endl;
