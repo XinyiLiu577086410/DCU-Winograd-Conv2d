@@ -29,7 +29,7 @@ winograd_2x3_kernel(_Float16* filter_d,
   __shared__ union {
     struct {
       fp16 V[TILE_IN_H][TILE_IN_W][BLK_K][BLK_M];
-      fp16 U[TILE_IN_H][TILE_IN_W][BLK_K][BLK_N];
+      fp16 Ut[TILE_IN_H][TILE_IN_W][BLK_N][BLK_K];
     };
     struct {
       fp16 Y[TILE_IN_H][TILE_IN_W][BLK_M][BLK_N];
@@ -41,6 +41,8 @@ winograd_2x3_kernel(_Float16* filter_d,
   const int tid = thx + thy * blockDim.x;
   const int blx = blockIdx.x;
   const int bly = blockIdx.y;
+  const int TCU_SIZE = 16; 
+  static_assert(BLK_M == 32 && BLK_N == 32 && BLK_K == 16, "incorrect block shape");
   
   typedef fp16 (*image_tensor_t) [is.ic][is.h][is.w];
   auto image = (image_tensor_t) image_d;
@@ -62,15 +64,17 @@ winograd_2x3_kernel(_Float16* filter_d,
     fp16 z0, z1, z2, z3, z6;
     
     if(thy == 1) { // must be 1 not 0
-      local_ic_idx   = thx % BLK_K;
-      local_oc_idx   = thx / BLK_K;
+      local_ic_idx = thx % BLK_K;
+      local_oc_idx = thx / BLK_K;
       // ! read filter slice from global memory into shared memory
       typedef fp16 filter_tile_t __attribute__((ext_vector_type(9)));
       filter_tile_t filter_tile = {0};
       if(oc_blk + local_oc_idx < fs.oc)
         if(ic_blk + local_ic_idx < fs.ic)
           filter_tile = *(filter_tile_t*)&filter[oc_blk + local_oc_idx][ic_blk + local_ic_idx][0][0];
-
+      
+      fp16 tmp[TILE_IN_H][TILE_IN_W];
+      
       //! filter transform
       for (int w = 0; w < FLT_W; ++w) {
         z6 = filter_tile[w + 0 * FLT_W];
@@ -79,44 +83,39 @@ winograd_2x3_kernel(_Float16* filter_d,
         z2 = ((fp16)( 1.0f / 2.0f )) * z6;
 
         z6 = filter_tile[w + 1 * FLT_W];
-
         z1 += ((fp16)( 1.0f / 2.0f )) * z6;
         z2 += ((fp16)(-1.0f / 2.0f )) * z6;
 
         z6 = filter_tile[w + 2 * FLT_W];
-
         z1 += ((fp16)( 1.0f / 2.0f )) * z6;
         z2 += ((fp16)( 1.0f / 2.0f )) * z6;
         z3 =  ((fp16)( 1.0f )) * z6;
 
-        lds.U[0][w][local_ic_idx][local_oc_idx] = z0;
-        lds.U[1][w][local_ic_idx][local_oc_idx] = z1;
-        lds.U[2][w][local_ic_idx][local_oc_idx] = z2;
-        lds.U[3][w][local_ic_idx][local_oc_idx] = z3;
+        tmp[0][w] = z0;
+        tmp[1][w] = z1;
+        tmp[2][w] = z2;
+        tmp[3][w] = z3;
       }
 
       for (int h = 0; h < TILE_IN_H; ++h) {
-        z6 = lds.U[h][0][local_ic_idx][local_oc_idx];
-
+        z6 = tmp[h][0];
         z0 = ((fp16)( 1.0f )) * z6;
         z1 = ((fp16)( 1.0f / 2.0f )) * z6;
         z2 = ((fp16)( 1.0f / 2.0f )) * z6;
 
-        z6 = lds.U[h][1][local_ic_idx][local_oc_idx];
-
+        z6 = tmp[h][1];
         z1 += ((fp16)( 1.0f / 2.0f )) * z6;
         z2 += ((fp16)(-1.0f / 2.0f )) * z6;
 
-        z6 = lds.U[h][2][local_ic_idx][local_oc_idx];
-
+        z6 = tmp[h][2];
         z1 += ((fp16)( 1.0f / 2.0f)) * z6;
         z2 += ((fp16)( 1.0f / 2.0f)) * z6;
         z3 = ((fp16)( 1.0f )) * z6;
 
-        lds.U[h][0][local_ic_idx][local_oc_idx] = z0;
-        lds.U[h][1][local_ic_idx][local_oc_idx] = z1;
-        lds.U[h][2][local_ic_idx][local_oc_idx] = z2;
-        lds.U[h][3][local_ic_idx][local_oc_idx] = z3;
+        lds.Ut[h][0][local_oc_idx][local_ic_idx] = z0;
+        lds.Ut[h][1][local_oc_idx][local_ic_idx] = z1;
+        lds.Ut[h][2][local_oc_idx][local_ic_idx] = z2;
+        lds.Ut[h][3][local_oc_idx][local_ic_idx] = z3;
       }
     }
 
@@ -128,10 +127,8 @@ winograd_2x3_kernel(_Float16* filter_d,
       if(tile_blk + local_tile_idx < ts.numTileTotal && ic_blk + local_ic_idx < is.ic) {
         const TileIndex ti = getTileIndex(tile_blk + local_tile_idx, ts);
         const uint64_t b = ti.b, th = ti.th, tw = ti.tw;
-        for(int h = 0; h < TILE_IN_H; ++h)
-        {
-          if(th * TILE_OUT_H + h - padding_h < is.h) 
-          {
+        for(int h = 0; h < TILE_IN_H; ++h) {
+          if(th * TILE_OUT_H + h - padding_h < is.h) {
               img_tile[h][0] = (tw * TILE_OUT_W + 0 - padding_w < is.w)
                                 ? image[b][ic_blk + local_ic_idx][th * TILE_OUT_H + h - padding_h][tw * TILE_OUT_W + 0 - padding_w] : 0;
               img_tile[h][1] = (tw * TILE_OUT_W + 1 - padding_w < is.w)
@@ -142,9 +139,7 @@ winograd_2x3_kernel(_Float16* filter_d,
                                 ? image[b][ic_blk + local_ic_idx][th * TILE_OUT_H + h - padding_h][tw * TILE_OUT_W + 3 - padding_w] : 0;
           }
         }
-      }
-      else 
-      {
+      } else {
         for(int h = 0; h < TILE_IN_H; ++h)
           for(int w = 0; w < TILE_IN_W; ++w)
             img_tile[h][w] = 0;
@@ -172,7 +167,6 @@ winograd_2x3_kernel(_Float16* filter_d,
         lds.V[2][w][local_ic_idx][local_tile_idx] = z2;
         lds.V[3][w][local_ic_idx][local_tile_idx] = z3;
       }
-
       for (int h = 0; h < TILE_IN_H; ++h) {
         z6 = lds.V[h][0][local_ic_idx][local_tile_idx];
         z0 = ((fp16) 1.0f) * z6;
@@ -203,29 +197,29 @@ winograd_2x3_kernel(_Float16* filter_d,
     asm volatile("s_waitcnt lgkmcnt(0)\n\t");
 
     //! do batched gemm
-    int elem_idx = tid / 64;
-    int h = elem_idx / TILE_IN_W;
-    int w = elem_idx % TILE_IN_W;
+    const int elem_idx = tid / 64;
+    const int h = elem_idx / TILE_IN_W;
+    const int w = elem_idx % TILE_IN_W;
     fp16x4 frag_A[2], frag_B[2];
-    size_t read_dim_k  = (tid % 64) / (BLK_M / 2) * 4;
-    size_t read_dim_mn = (tid % 64) % (BLK_M / 2);
-    frag_A[0] = { lds.V[h][w][read_dim_k + 0][read_dim_mn], 
-                  lds.V[h][w][read_dim_k + 1][read_dim_mn], 
-                  lds.V[h][w][read_dim_k + 2][read_dim_mn], 
-                  lds.V[h][w][read_dim_k + 3][read_dim_mn] };
-    frag_B[0] = { lds.U[h][w][read_dim_k + 0][read_dim_mn], 
-                  lds.U[h][w][read_dim_k + 1][read_dim_mn], 
-                  lds.U[h][w][read_dim_k + 2][read_dim_mn], 
-                  lds.U[h][w][read_dim_k + 3][read_dim_mn] };
-    read_dim_mn += 16;
-    frag_A[1] = { lds.V[h][w][read_dim_k + 0][read_dim_mn], 
-                  lds.V[h][w][read_dim_k + 1][read_dim_mn], 
-                  lds.V[h][w][read_dim_k + 2][read_dim_mn], 
-                  lds.V[h][w][read_dim_k + 3][read_dim_mn] };
-    frag_B[1] = { lds.U[h][w][read_dim_k + 0][read_dim_mn], 
-                  lds.U[h][w][read_dim_k + 1][read_dim_mn], 
-                  lds.U[h][w][read_dim_k + 2][read_dim_mn], 
-                  lds.U[h][w][read_dim_k + 3][read_dim_mn] };
+    const size_t read_dim_k  = (tid % 64) / TCU_SIZE * 4;
+    const size_t read_dim_mn = (tid % 64) % TCU_SIZE;
+    frag_A[0] = { lds.V[h][w][read_dim_k + 0][read_dim_mn +  0], 
+                  lds.V[h][w][read_dim_k + 1][read_dim_mn +  0], 
+                  lds.V[h][w][read_dim_k + 2][read_dim_mn +  0], 
+                  lds.V[h][w][read_dim_k + 3][read_dim_mn +  0] };
+    frag_A[1] = { lds.V[h][w][read_dim_k + 0][read_dim_mn + 16], 
+                  lds.V[h][w][read_dim_k + 1][read_dim_mn + 16], 
+                  lds.V[h][w][read_dim_k + 2][read_dim_mn + 16], 
+                  lds.V[h][w][read_dim_k + 3][read_dim_mn + 16] };
+
+    frag_B[0] = { lds.Ut[h][w][read_dim_mn +  0][read_dim_k + 0], 
+                  lds.Ut[h][w][read_dim_mn +  0][read_dim_k + 1], 
+                  lds.Ut[h][w][read_dim_mn +  0][read_dim_k + 2], 
+                  lds.Ut[h][w][read_dim_mn +  0][read_dim_k + 3] };
+    frag_B[1] = { lds.Ut[h][w][read_dim_mn + 16][read_dim_k + 0], 
+                  lds.Ut[h][w][read_dim_mn + 16][read_dim_k + 1], 
+                  lds.Ut[h][w][read_dim_mn + 16][read_dim_k + 2], 
+                  lds.Ut[h][w][read_dim_mn + 16][read_dim_k + 3] };
     asm volatile("s_waitcnt lgkmcnt(0)\n\t");
 
     #define NOP_48_CYCLES() asm volatile("s_nop 8\n\t"); \
@@ -249,11 +243,11 @@ winograd_2x3_kernel(_Float16* filter_d,
   __syncthreads();
 
   //! Store the result matrices of batched gemm into lds.
-  int elem_idx = tid / 64;
-  int h = elem_idx / TILE_IN_W;
-  int w = elem_idx % TILE_IN_W;
-  size_t write_local_tile = (tid % 64) % (BLK_M / 2);
-  size_t write_local_oc   = (tid % 64) / (BLK_M / 2);
+  const int elem_idx = tid / 64;
+  const int h = elem_idx / TILE_IN_W;
+  const int w = elem_idx % TILE_IN_W;
+  const size_t write_local_tile = (tid % 64) % TCU_SIZE;
+  const size_t write_local_oc   = (tid % 64) / TCU_SIZE;
   lds.Y[h][w][write_local_oc +  0 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0][0].x;
   lds.Y[h][w][write_local_oc +  4 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0][0].y;
   lds.Y[h][w][write_local_oc +  8 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0][0].z;
