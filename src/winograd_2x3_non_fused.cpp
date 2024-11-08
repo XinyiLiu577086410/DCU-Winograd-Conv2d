@@ -13,7 +13,7 @@
 template <typename inoutT, 
           typename calcT,
           size_t   work_group_size>
-__global__ static void input_transform_collapsed_ic_x_tile
+__global__ static void input_transform_collapsed_wino2x3
                             (fp16*     __restrict__ image, 
                              ImgShape               is,  
                              void*     __restrict__ V_, 
@@ -102,7 +102,7 @@ __global__ static void input_transform_collapsed_ic_x_tile
 template <typename inoutT, 
           typename calcT, 
           int work_group_size>
-__global__ static void filter_transform_no_transpose
+__global__ static void filter_transform_wino2x3
                                         ( fp16*     __restrict__ filter, 
                                           void*     __restrict__ U_,
                                           UShape                 us, 
@@ -164,7 +164,7 @@ __global__ static void filter_transform_no_transpose
 template <typename inoutT, 
           typename calcT,
           int work_group_size>
-__global__ static void output_transform
+__global__ static void output_transform_wino2x3
                             (void*     __restrict__ M_, 
                               int                   simdDimSize,
                               fp16*    __restrict__ out, 
@@ -248,9 +248,9 @@ void winograd_2x3_none_fused(const void* param_ptr) {
     VShape    vs = getVShape(is, ts);
   
     const size_t work_group_size = HEP_WARP_SIZE;
-    input_transform_collapsed_ic_x_tile <fp16, fp16, work_group_size> <<< vs.ic * vs.numTileTotal / work_group_size, work_group_size >>> (image_d, is, V_d, vs, vs.ic * vs.numTileTotal, ts, padding_h, padding_w);
+    input_transform_collapsed_wino2x3 <fp16, fp16, work_group_size> <<< DIV_UP(vs.ic * vs.numTileTotal, work_group_size), work_group_size >>> (image_d, is, V_d, vs, vs.ic * vs.numTileTotal, ts, padding_h, padding_w);
     HIP_CHECK_KERNEL("Kernel panic!!!");
-    filter_transform_no_transpose <fp16, fp16, work_group_size> <<<DIV_UP(us.ic * us.oc, work_group_size), work_group_size>>> (filter_d, U_d, us, us.ic * us.oc);
+    filter_transform_wino2x3 <fp16, fp16, work_group_size> <<<DIV_UP(us.ic * us.oc, work_group_size), work_group_size>>> (filter_d, U_d, us, us.ic * us.oc);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
     const float alpha = 1.0, beta = 0.0;
     hep_sgemm<fp16, float>( vs.numTileTotal, us.oc, us.ic,
@@ -265,7 +265,7 @@ void winograd_2x3_none_fused(const void* param_ptr) {
                                 TILE_IN_H * TILE_IN_W,
                                 hipStreamDefault );
 
-    output_transform <fp16, fp16, work_group_size> <<< DIV_UP(us.oc * vs.numTileTotal, work_group_size), work_group_size >>>(M_d, us.oc * vs.numTileTotal, out_d, os, ts);
+    output_transform_wino2x3 <fp16, fp16, work_group_size> <<< DIV_UP(us.oc * vs.numTileTotal, work_group_size), work_group_size >>>(M_d, us.oc * vs.numTileTotal, out_d, os, ts);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
 
 }
