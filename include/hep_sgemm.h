@@ -289,12 +289,13 @@ static void hep_sgemm(int32_t       m,
 
     if((m % 64 == 0) && (n % 32 == 0) && (k % 16 == 0))
     {
-        if((m % 256 == 0) && (n % 32 == 0) && (k % 16 == 0) && (m <= n)){
+        if((m % 256 == 0) && (n % 64 == 0) && (k % 16 == 0) && (m <= n)){
             const int blk_m = 256;
-            const int blk_n = 32;
+            const int blk_n = 64;
             const int blk_k = 16;
             const int warp  = 4;
             static_assert(warp <= blk_n / 4, "warp size is too large");
+            static_assert(warp <= blk_m / 16, "warp size is too large");
             static_assert(!(blk_m % warp) && !(blk_n % warp), "incorrect warp size");
             dim3      dimBlock(HEP_WARP_SIZE, warp);
             dim3      dimGrid(m / blk_m, n / blk_n, batch_count);
