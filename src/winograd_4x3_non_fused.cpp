@@ -150,10 +150,11 @@ __global__ static void input_transform_collapsed_ic_x_tile
 template <typename inoutT, 
           typename calcT, 
           int work_group_size>
-__global__ static void filter_transform_no_transpose(fp16*     __restrict__ filter, 
-                                              void*     __restrict__ U_,
-                                              UShape                 us, 
-                                              int                    simdDimSize) 
+__global__ static void filter_transform
+                    (fp16*    __restrict__ filter, 
+                    void*     __restrict__ U_,
+                    UShape                 us, 
+                    int                    simdDimSize) 
 {
   auto U = reinterpret_cast<inoutT*>(U_);
   __shared__ calcT tmp[work_group_size][TILE_IN_H][TILE_IN_W] ;
@@ -232,7 +233,8 @@ __global__ static void filter_transform_no_transpose(fp16*     __restrict__ filt
 template <typename inoutT, 
           typename calcT,
           int work_group_size>
-__global__ static void output_transform(void* __restrict__    M_, 
+__global__ static void output_transform
+                                (void* __restrict__    M_, 
                                  int                   simdDimSize,
                                  fp16*    __restrict__ out, 
                                  OutShape              os,  
@@ -350,7 +352,6 @@ __global__ static void output_transform(void* __restrict__    M_,
 }
 
 void winograd_4x3_none_fused(const void* param_ptr) {
-    // std::cout << "winograd_4x3_none_fused" << std::endl;
     const mykernelParamType* param = (const mykernelParamType*)param_ptr;
     fp16* filter_d = param->pweight;
     fp16* image_d  = param->pin;
@@ -372,7 +373,7 @@ void winograd_4x3_none_fused(const void* param_ptr) {
     const size_t work_group_size = HEP_WARP_SIZE;
     input_transform_collapsed_ic_x_tile <fp16, fp16, work_group_size> <<< DIV_UP(vs.ic * vs.numTileTotal, work_group_size), work_group_size >>> (image_d, is, V_d, vs, vs.ic * vs.numTileTotal, ts, padding_h, padding_w);
     HIP_CHECK_KERNEL("Kernel panic!!!");
-    filter_transform_no_transpose <fp16, fp16, work_group_size> <<<DIV_UP(us.ic * us.oc, work_group_size), work_group_size>>> (filter_d, U_d, us, us.ic * us.oc);
+    filter_transform <fp16, fp16, work_group_size> <<<DIV_UP(us.ic * us.oc, work_group_size), work_group_size>>> (filter_d, U_d, us, us.ic * us.oc);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
     const float alpha = 1.0, beta = 0.0;
     hep_sgemm<fp16, float>( vs.numTileTotal, us.oc, us.ic,
