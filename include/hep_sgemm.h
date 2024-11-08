@@ -302,16 +302,37 @@ static void hep_sgemm(int32_t       m,
             gemm_batched_kernel_tensorcore_fp16fp32_Akxm_Bnxk_Cnxm_template<blk_m, blk_n, blk_k, warp><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
             return ;
         }
-        if((m % 64 == 0) && (n % 128 == 0) && (k % 16 == 0) && (m > n)){
-            const int blk_m = 64;
+        if((m % 256 == 0) && (n % 128 == 0) && (k % 16 == 0) && (m > n)){
+            const int blk_m = 256;
             const int blk_n = 128;
             const int blk_k = 16;
-            const int warp  = 2;
+            const int warp  = 4;
             static_assert(warp <= blk_n / 4, "warp size is too large");
             static_assert(!(blk_m % warp) && !(blk_n % warp), "incorrect warp size");
             dim3      dimBlock(HEP_WARP_SIZE, warp);
             dim3      dimGrid(m / blk_m, n / blk_n, batch_count);
             gemm_batched_kernel_tensorcore_fp16fp32_Akxm_Bnxk_Cnxm_template<blk_m, blk_n, blk_k, warp><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
+            return ;
+        } 
+        else if((m % 64 == 0) && (n % 32 == 0) && (k % 16 == 0))
+        {
+            const int blk_m = 64;
+            const int blk_n = 32;
+            const int blk_k = 16;
+            const int warp  = 1;
+            dim3      dimBlock(HEP_WARP_SIZE, warp);
+            dim3      dimGrid(m / blk_m, n / blk_n, batch_count);
+            gemm_batched_kernel_tensorcore_fp16fp32_Akxm_Bnxk_Cnxm_template<blk_m, blk_n, blk_k, warp><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
+            return ;
+        }
+        else
+        {
+            const int blk_m = 32;
+            const int blk_n = 32;
+            const int blk_k = 16;
+            dim3      dimBlock(HEP_WARP_SIZE);
+            dim3      dimGrid((m - 1) / blk_m + 1, (n - 1) / blk_n + 1, batch_count);
+            gemm_batched_general_kernel_tensorcore_32x32x16_fp16fp32_Akxm_Bnxk_Cnxm<blk_m, blk_n, blk_k><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
             return ;
         }
     }
