@@ -412,7 +412,7 @@ void winograd_2x3_none_fused(const void* param_ptr) {
                                 TILE_IN_H * TILE_IN_W,
                                 hipStreamDefault );
 
-    output_transform <fp16, fp16, work_group_size> <<< us.oc * vs.numTileTotal / work_group_size, work_group_size >>>(M_d, us.oc * vs.numTileTotal, out_d, os, ts);
+    output_transform <fp16, fp16, work_group_size> <<< DIV_UP(us.oc * vs.numTileTotal, work_group_size), work_group_size >>>(M_d, us.oc * vs.numTileTotal, out_d, os, ts);
     HIP_CHECK_KERNEL("Kernel panic!!!");    
 
 }
