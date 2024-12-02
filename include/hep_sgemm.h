@@ -8,6 +8,229 @@ template <int  BLK_M,
           int  BLK_K,
           int  WARP>
 __global__ __launch_bounds__(HEP_WARP_SIZE * WARP) static void
+gemm_batched_kernel_fp16fp32_Akxm_Bnxk_Cnxm_template
+                   (int32_t    M,
+                    int32_t    N,
+                    int32_t    K,
+                    fp16*  dA_input,
+                    int32_t    lda,
+                    fp16*  dB_input,
+                    int32_t    ldb,
+                    fp16*  dC_input,
+                    int32_t    ldc)
+{
+    static_assert(!(BLK_M % 16) && !(BLK_N % 16) && !(BLK_K % 16), "incorrect block shape");
+    assert(!(M % BLK_M) && !(N % BLK_N) && !(K % BLK_K));
+
+    const int MMAC_M = BLK_M / 16;
+    const int MMAC_N = BLK_N / 16;
+    const int thx  = threadIdx.x;
+    const int warp = threadIdx.y;
+    const int blx  = blockIdx.x;  // block's m position
+    const int bly  = blockIdx.y;  // block's n position
+    const int blz  = blockIdx.z;  // block's matrix in the batch 
+    dA_input += size_t(blz) * M * K;
+    dB_input += size_t(blz) * N * K;
+    dC_input += size_t(blz) * N * M;
+    __shared__ struct {
+        fp16 A[BLK_K][BLK_M / 2 + 1][2];
+        fp16 B[BLK_K][BLK_N / 2 + 1][2];
+    } lds;
+
+    const int LINE_PER_WARP = (HEP_WARP_SIZE / BLK_K);
+    const int BLK_M_PER_WARP = BLK_M / WARP;
+    const int MMAC_A_PER_WARP = BLK_M_PER_WARP / BLK_K;
+
+    fp32x4 C_reg_acc[MMAC_A_PER_WARP][MMAC_N] = {0};
+
+    int kk = 0;
+    for(; kk < K; kk += BLK_K)
+    {
+        const int BLK_N_PER_WARP = BLK_N / WARP;
+        const int BLK_B_PER_WARP = BLK_N_PER_WARP / LINE_PER_WARP;
+        size_t read_dim_k  = thx % BLK_K;
+        size_t read_dim_n  = thx / BLK_K + BLK_N_PER_WARP * warp;
+        
+        size_t offset_B = size_t(kk + read_dim_k) + size_t(bly * BLK_N + read_dim_n) * size_t(ldb);
+
+        #pragma unroll(BLK_B_PER_WARP)
+        for (int i = 0; i < BLK_B_PER_WARP; i++) {
+            lds.B[read_dim_k][read_dim_n % (BLK_N / 2)][read_dim_n / (BLK_N / 2)] = dB_input[offset_B];
+            read_dim_n += LINE_PER_WARP;
+            offset_B += LINE_PER_WARP * size_t(ldb);
+        }
+
+        size_t read_dim_m = thx % BLK_K;
+        read_dim_k  = thx / BLK_K * LINE_PER_WARP;
+        size_t offset_A = size_t(kk + read_dim_k) * size_t(lda) + size_t(blx * BLK_M + read_dim_m + BLK_M_PER_WARP * warp);
+        
+        #pragma unroll(MMAC_A_PER_WARP)
+        for (int i = 0; i < MMAC_A_PER_WARP; ++i)
+        {
+            lds.A[read_dim_k + 0][read_dim_m % (BLK_M / 2)][read_dim_m / (BLK_M / 2)] = dA_input[offset_A + 0 * size_t(lda)];
+            lds.A[read_dim_k + 1][read_dim_m % (BLK_M / 2)][read_dim_m / (BLK_M / 2)] = dA_input[offset_A + 1 * size_t(lda)];
+            lds.A[read_dim_k + 2][read_dim_m % (BLK_M / 2)][read_dim_m / (BLK_M / 2)] = dA_input[offset_A + 2 * size_t(lda)];
+            lds.A[read_dim_k + 3][read_dim_m % (BLK_M / 2)][read_dim_m / (BLK_M / 2)] = dA_input[offset_A + 3 * size_t(lda)];
+            offset_A += BLK_K;
+            read_dim_m += BLK_K;
+        }
+
+        __syncthreads();
+
+        size_t write_dim_m = thx % BLK_K;
+        #pragma unroll(MMAC_A_PER_WARP)
+        for(int i = 0; i < MMAC_A_PER_WARP; ++i, write_dim_m += BLK_K) {
+            size_t write_dim_n = thx / BLK_K;
+            #pragma unroll(MMAC_N)
+            for(int j = 0; j < MMAC_N; ++j, write_dim_n += BLK_K) {
+                for (int k = 0; k < BLK_K; k++) {
+                    float a = lds.A[k][write_dim_m % (BLK_M / 2)][write_dim_m / (BLK_M / 2)];
+                    for (int t = 0; t < BLK_K / LINE_PER_WARP; ++t) {
+                        C_reg_acc[i][j][t] += a * (float)lds.B[k][(write_dim_n + t * LINE_PER_WARP) % (BLK_N / 2)][(write_dim_n + t * LINE_PER_WARP) / (BLK_N / 2)];
+                    }
+                }  
+            }
+        }
+    }
+
+    size_t output_row = thx / BLK_K;
+    size_t output_col = thx % BLK_K;
+    size_t offset_C_row = size_t(bly * BLK_N + output_row);
+    size_t offset_C_col = size_t(blx * BLK_M + output_col);
+
+    #pragma unroll(MMAC_A_PER_WARP) 
+    for(int i = 0; i < MMAC_A_PER_WARP; i++) {
+        #pragma unroll(MMAC_N)
+        for(int j = 0; j < MMAC_N; ++j) {
+            size_t offset_C = size_t(offset_C_row + j * BLK_K) * size_t(ldc) + size_t(offset_C_col + i * BLK_K + BLK_M_PER_WARP * warp);
+            dC_input[offset_C +  0 * size_t(ldc)] = (fp16)C_reg_acc[i][j].x;
+            dC_input[offset_C +  4 * size_t(ldc)] = (fp16)C_reg_acc[i][j].y;
+            dC_input[offset_C +  8 * size_t(ldc)] = (fp16)C_reg_acc[i][j].z;
+            dC_input[offset_C + 12 * size_t(ldc)] = (fp16)C_reg_acc[i][j].w;
+        }
+    }
+}
+
+
+template <int  BLK_M,
+          int  BLK_N,
+          int  BLK_K>
+__global__ __launch_bounds__(HEP_WARP_SIZE) static void
+gemm_batched_general_kernel_fp16fp32_Akxm_Bnxk_Cnxm_template
+                   (int32_t    M,
+                    int32_t    N,
+                    int32_t    K,
+                    fp16*  dA_input,
+                    int32_t    lda,
+                    fp16*  dB_input,
+                    int32_t    ldb,
+                    fp16*  dC_input,
+                    int32_t    ldc)
+{
+    static_assert(!(BLK_M % 16) && !(BLK_N % 16) && !(BLK_K % 16), "incorrect block shape");
+    assert(blockDim.x == HEP_WARP_SIZE);
+    assert(blockDim.y == 1);
+    assert(blockDim.z == 1);
+    assert(!(M % BLK_M) && !(N % BLK_N) && !(K % BLK_K));
+
+    const int MMAC_M = DIV_UP(BLK_M, 16);
+    const int MMAC_N = DIV_UP(BLK_N, 16);
+    const int thx  = threadIdx.x;
+    const int blx  = blockIdx.x;  // block's m position
+    const int bly  = blockIdx.y;  // block's n position
+    const int blz  = blockIdx.z;  // block's matrix in the batch 
+    dA_input += size_t(blz) * M * K;
+    dB_input += size_t(blz) * N * K;
+    dC_input += size_t(blz) * N * M;
+    __shared__ struct {
+        fp16 A[BLK_K][BLK_M / 2 + 1][2];
+        fp16 B[BLK_K][BLK_N / 2 + 1][2];
+    } lds;
+
+    const int LINE_PER_WARP = (HEP_WARP_SIZE / BLK_K);
+    fp32x4 C_reg_acc[MMAC_M][MMAC_N] = {0};
+
+    int kk = 0;
+    for(; kk < K; kk += BLK_K)
+    {
+        const int BLK_B = BLK_N / LINE_PER_WARP;
+        size_t read_dim_k  = thx % BLK_K;
+        size_t read_dim_n  = thx / BLK_K;
+        
+        size_t offset_B = size_t(kk + read_dim_k) + size_t(bly * BLK_N + read_dim_n) * size_t(ldb);
+
+        #pragma unroll(BLK_B)
+        for (int i = 0; i < BLK_B; i++) {
+            lds.B[read_dim_k][read_dim_n % (BLK_N / 2)][read_dim_n / (BLK_N / 2)] = 
+                (kk + read_dim_k < K && bly * BLK_N + read_dim_n < N) ? dB_input[offset_B] : (fp16)0.0;
+            read_dim_n += LINE_PER_WARP;
+            offset_B += LINE_PER_WARP * size_t(ldb);
+        }
+
+        size_t read_dim_m = thx % BLK_K;
+        read_dim_k  = thx / BLK_K * LINE_PER_WARP;
+        size_t offset_A = size_t(kk + read_dim_k) * size_t(lda) + size_t(blx * BLK_M + read_dim_m);
+        #pragma unroll(MMAC_M)
+        for (int i = 0; i < MMAC_M; ++i)
+        {
+            lds.A[read_dim_k + 0][read_dim_m % (BLK_M / 2)][read_dim_m / (BLK_M / 2)] =
+                (kk + read_dim_k + 0 < K && blx * BLK_M + read_dim_m < M) ? dA_input[offset_A + 0 * size_t(lda)] : (fp16)0.0;
+            lds.A[read_dim_k + 1][read_dim_m % (BLK_M / 2)][read_dim_m / (BLK_M / 2)] = 
+                (kk + read_dim_k + 1 < K && blx * BLK_M + read_dim_m < M) ? dA_input[offset_A + 1 * size_t(lda)] : (fp16)0.0;
+            lds.A[read_dim_k + 2][read_dim_m % (BLK_M / 2)][read_dim_m / (BLK_M / 2)] = 
+                (kk + read_dim_k + 2 < K && blx * BLK_M + read_dim_m < M) ? dA_input[offset_A + 2 * size_t(lda)] : (fp16)0.0;
+            lds.A[read_dim_k + 3][read_dim_m % (BLK_M / 2)][read_dim_m / (BLK_M / 2)] =
+                (kk + read_dim_k + 3 < K && blx * BLK_M + read_dim_m < M) ? dA_input[offset_A + 3 * size_t(lda)] : (fp16)0.0;
+            offset_A += BLK_K;
+            read_dim_m += BLK_K;
+        }
+
+        __syncthreads();
+
+        size_t write_dim_m = thx % BLK_K;
+        #pragma unroll(MMAC_M)
+        for(int i = 0; i < MMAC_M; ++i, write_dim_m += BLK_K) {
+            size_t write_dim_n = thx / BLK_K;
+            #pragma unroll(MMAC_N)
+            for(int j = 0; j < MMAC_N; ++j, write_dim_n += BLK_K) {
+                for (int k = 0; k < BLK_K; k++) {
+                    float a = lds.A[k][write_dim_m % (BLK_M / 2)][write_dim_m / (BLK_M / 2)];
+                    for (int t = 0; t < BLK_K / LINE_PER_WARP; ++t) {
+                        C_reg_acc[i][j][t] += a * (float)lds.B[k][(write_dim_n + t * LINE_PER_WARP) % (BLK_N / 2)][(write_dim_n + t * LINE_PER_WARP) / (BLK_N / 2)];
+                    }
+                }  
+            }
+        }
+    }
+
+    size_t output_row = thx / BLK_K;
+    size_t output_col = thx % BLK_K;
+    size_t offset_C_row = size_t(bly * BLK_N + output_row);
+    size_t offset_C_col = size_t(blx * BLK_M + output_col);
+
+    #pragma unroll(MMAC_M) 
+    for(int i = 0; i < MMAC_M; i++) {
+        #pragma unroll(MMAC_N)
+        for(int j = 0; j < MMAC_N; ++j) {
+            size_t offset_C = size_t(offset_C_row + j * BLK_K) * size_t(ldc) + size_t(offset_C_col + i * BLK_K);
+            if(offset_C_col + i * BLK_K < M && offset_C_row + j * BLK_K +  0 < N) 
+                dC_input[offset_C +  0 * size_t(ldc)] = (fp16)C_reg_acc[i][j].x;
+            if(offset_C_col + i * BLK_K < M && offset_C_row + j * BLK_K +  4 < N) 
+                dC_input[offset_C +  4 * size_t(ldc)] = (fp16)C_reg_acc[i][j].y;
+            if(offset_C_col + i * BLK_K < M && offset_C_row + j * BLK_K +  8 < N) 
+                dC_input[offset_C +  8 * size_t(ldc)] = (fp16)C_reg_acc[i][j].z;
+            if(offset_C_col + i * BLK_K < M && offset_C_row + j * BLK_K + 12 < N) 
+                dC_input[offset_C + 12 * size_t(ldc)] = (fp16)C_reg_acc[i][j].w;
+        }
+    }
+}
+
+#ifdef HYGON_DCU_MATRIX_CORE
+template <int  BLK_M,
+          int  BLK_N,
+          int  BLK_K,
+          int  WARP>
+__global__ __launch_bounds__(HEP_WARP_SIZE * WARP) static void
 gemm_batched_kernel_tensorcore_fp16fp32_Akxm_Bnxk_Cnxm_template
                    (int32_t    M,
                     int32_t    N,
@@ -36,49 +259,50 @@ gemm_batched_kernel_tensorcore_fp16fp32_Akxm_Bnxk_Cnxm_template
         fp16 B[BLK_K][BLK_N / 2 + 1][2];
     } lds;
 
+    const int LINE_PER_WARP = (HEP_WARP_SIZE / BLK_K);
     const int BLK_M_PER_WARP = BLK_M / WARP;
-    const int BLK_A_PER_WARP = BLK_M_PER_WARP / 16;
+    const int MMAC_A_PER_WARP = BLK_M_PER_WARP / BLK_K;
 
-    fp32x4 C_reg_acc[BLK_A_PER_WARP][MMAC_N] = {0};
+    fp32x4 C_reg_acc[MMAC_A_PER_WARP][MMAC_N] = {0};
 
     int kk = 0;
     for(; kk < K; kk += BLK_K)
     {
-        fp16x4 frag_A[BLK_A_PER_WARP], frag_B[MMAC_N];
+        fp16x4 frag_A[MMAC_A_PER_WARP], frag_B[MMAC_N];
         
         const int BLK_N_PER_WARP = BLK_N / WARP;
-        const int STRIPE_B_PER_WARP = BLK_N_PER_WARP / 4;
+        const int BLK_B_PER_WARP = BLK_N_PER_WARP / LINE_PER_WARP;
         size_t read_dim_k  = thx % BLK_K;
         size_t read_dim_n  = thx / BLK_K + BLK_N_PER_WARP * warp;
         
         size_t offset_B = size_t(kk + read_dim_k) + size_t(bly * BLK_N + read_dim_n) * size_t(ldb);
 
-        #pragma unroll(STRIPE_B_PER_WARP)
-        for (int i = 0; i < STRIPE_B_PER_WARP; i++)
+        #pragma unroll(BLK_B_PER_WARP)
+        for (int i = 0; i < BLK_B_PER_WARP; i++)
         {
             lds.B[read_dim_k][read_dim_n % (BLK_N / 2)][read_dim_n / (BLK_N / 2)] = dB_input[offset_B];
-            read_dim_n += 4;
-            offset_B += 4 * size_t(ldb);
+            read_dim_n += LINE_PER_WARP;
+            offset_B += LINE_PER_WARP * size_t(ldb);
         }
 
         size_t read_dim_m = thx % BLK_K;
-        read_dim_k  = thx / BLK_K * 4;
+        read_dim_k  = thx / BLK_K * LINE_PER_WARP;
         size_t offset_A = size_t(kk + read_dim_k) * size_t(lda) + size_t(blx * BLK_M + read_dim_m + BLK_M_PER_WARP * warp);
         
-        #pragma unroll(BLK_A_PER_WARP)
-        for (int i = 0; i < BLK_A_PER_WARP; ++i)
+        #pragma unroll(MMAC_A_PER_WARP)
+        for (int i = 0; i < MMAC_A_PER_WARP; ++i)
         {
             frag_A[i] = {dA_input[offset_A + 0 * size_t(lda)],
                          dA_input[offset_A + 1 * size_t(lda)],
                          dA_input[offset_A + 2 * size_t(lda)],
                          dA_input[offset_A + 3 * size_t(lda)]};
-            offset_A += 16;
+            offset_A += BLK_K;
         }
 
         __syncthreads();
 
         read_dim_n = thx % BLK_K;
-        read_dim_k  = thx / BLK_K * 4;
+        read_dim_k  = thx / BLK_K * LINE_PER_WARP;
                 
         #pragma unroll(MMAC_N)
         for (int i = 0; i < MMAC_N; ++i)
@@ -87,13 +311,13 @@ gemm_batched_kernel_tensorcore_fp16fp32_Akxm_Bnxk_Cnxm_template
                          lds.B[read_dim_k + 1][(read_dim_n +  0) % (BLK_N / 2)][(read_dim_n +  0) / (BLK_N / 2)],
                          lds.B[read_dim_k + 2][(read_dim_n +  0) % (BLK_N / 2)][(read_dim_n +  0) / (BLK_N / 2)],
                          lds.B[read_dim_k + 3][(read_dim_n +  0) % (BLK_N / 2)][(read_dim_n +  0) / (BLK_N / 2)]};
-            read_dim_n += 16;
+            read_dim_n += BLK_K;
         }       
 
         asm volatile("s_waitcnt lgkmcnt(0)\n\t");
         
-        #pragma unroll(BLK_A_PER_WARP)
-        for(int i = 0; i < BLK_A_PER_WARP; ++i)
+        #pragma unroll(MMAC_A_PER_WARP)
+        for(int i = 0; i < MMAC_A_PER_WARP; ++i)
             #pragma unroll(MMAC_N)
             for(int j = 0; j < MMAC_N; ++j)
             {
@@ -101,26 +325,26 @@ gemm_batched_kernel_tensorcore_fp16fp32_Akxm_Bnxk_Cnxm_template
             }
     }
 
-    size_t output_row = thx % 16;
-    size_t output_col = thx / 16;
+    size_t output_row = thx / BLK_K;
+    size_t output_col = thx % BLK_K;
+    size_t offset_C_row = size_t(bly * BLK_N + output_row);
+    size_t offset_C_col = size_t(blx * BLK_M + output_col);
 
-    size_t offset_C_row = size_t(bly * BLK_N + output_col);
-    size_t offset_C_col = size_t(blx * BLK_M + output_row);
-
-    #pragma unroll(BLK_A_PER_WARP)
-    for(int i = 0; i < BLK_A_PER_WARP; i++)
+    #pragma unroll(MMAC_A_PER_WARP)
+    for(int i = 0; i < MMAC_A_PER_WARP; i++)
         #pragma unroll(MMAC_N)
         for(int j = 0; j < MMAC_N; ++j)
         {
-            size_t offset_C = size_t(offset_C_row + j * 16) * size_t(ldc) + size_t(offset_C_col + i * 16 + BLK_M_PER_WARP * warp);
+            size_t offset_C = size_t(offset_C_row + j * BLK_K) * size_t(ldc) + size_t(offset_C_col + i * BLK_K + BLK_M_PER_WARP * warp);
             dC_input[offset_C +  0 * size_t(ldc)] = (fp16)C_reg_acc[i][j].x;
             dC_input[offset_C +  4 * size_t(ldc)] = (fp16)C_reg_acc[i][j].y;
             dC_input[offset_C +  8 * size_t(ldc)] = (fp16)C_reg_acc[i][j].z;
             dC_input[offset_C + 12 * size_t(ldc)] = (fp16)C_reg_acc[i][j].w;
         }
 }
+#endif
 
-
+#ifdef HYGON_DCU_MATRIX_CORE
 template <int  BLK_M,
           int  BLK_N,
           int  BLK_K>
@@ -265,7 +489,7 @@ gemm_batched_general_kernel_tensorcore_32x32x16_fp16fp32_Akxm_Bnxk_Cnxm
     if(flagC[14]) dC_input[offset_C3 +  8 * size_t(ldc)] = (fp16)C_reg_acc[1][1].z;
     if(flagC[15]) dC_input[offset_C3 + 12 * size_t(ldc)] = (fp16)C_reg_acc[1][1].w;
 }
-
+#endif
 
 
 template <typename inoutT, typename calcT>
@@ -286,7 +510,7 @@ static void hep_sgemm(int32_t       m,
 	auto dA = reinterpret_cast<inoutT*>(dA_);
 	auto dB = reinterpret_cast<inoutT*>(dB_);
 	auto dC = reinterpret_cast<inoutT*>(dC_); 
-
+    #ifdef HYGON_DCU_MATRIX_CORE
     if((m % 64 == 0) && (n % 32 == 0) && (k % 16 == 0))
     {
         if((m % 256 == 0) && (n % 64 == 0) && (k % 16 == 0) && (m <= n)){
@@ -308,6 +532,7 @@ static void hep_sgemm(int32_t       m,
             const int blk_k = 16;
             const int warp  = 4;
             static_assert(warp <= blk_n / 4, "warp size is too large");
+            static_assert(warp <= blk_m / 16, "warp size is too large");
             static_assert(!(blk_m % warp) && !(blk_n % warp), "incorrect warp size");
             dim3      dimBlock(HEP_WARP_SIZE, warp);
             dim3      dimGrid(m / blk_m, n / blk_n, batch_count);
@@ -320,6 +545,9 @@ static void hep_sgemm(int32_t       m,
             const int blk_n = 32;
             const int blk_k = 16;
             const int warp  = 1;
+            static_assert(warp <= blk_n / 4, "warp size is too large");
+            static_assert(warp <= blk_m / 16, "warp size is too large");
+            static_assert(!(blk_m % warp) && !(blk_n % warp), "incorrect warp size");
             dim3      dimBlock(HEP_WARP_SIZE, warp);
             dim3      dimGrid(m / blk_m, n / blk_n, batch_count);
             gemm_batched_kernel_tensorcore_fp16fp32_Akxm_Bnxk_Cnxm_template<blk_m, blk_n, blk_k, warp><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
@@ -342,6 +570,9 @@ static void hep_sgemm(int32_t       m,
         const int blk_n = 32;
         const int blk_k = 16;
         const int warp  = 1;
+        static_assert(warp <= blk_n / 4, "warp size is too large");
+        static_assert(warp <= blk_m / 16, "warp size is too large");
+        static_assert(!(blk_m % warp) && !(blk_n % warp), "incorrect warp size");
         dim3      dimBlock(HEP_WARP_SIZE, warp);
         dim3      dimGrid(m / blk_m, n / blk_n, batch_count);
         gemm_batched_kernel_tensorcore_fp16fp32_Akxm_Bnxk_Cnxm_template<blk_m, blk_n, blk_k, warp><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
@@ -357,4 +588,25 @@ static void hep_sgemm(int32_t       m,
         gemm_batched_general_kernel_tensorcore_32x32x16_fp16fp32_Akxm_Bnxk_Cnxm<blk_m, blk_n, blk_k><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
         return ;
     }
+    #else 
+    if((m % 32 == 0) && (n % 32 == 0) && (k % 16 == 0)) {
+        const int blk_m = 32;
+        const int blk_n = 32;
+        const int blk_k = 16;
+        const int warp  = 1;
+        dim3      dimBlock(HEP_WARP_SIZE, 1);
+        dim3      dimGrid((m - 1) / blk_m + 1, (n - 1) / blk_n + 1, batch_count);
+        gemm_batched_kernel_fp16fp32_Akxm_Bnxk_Cnxm_template<blk_m, blk_n, blk_k, warp><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
+        return ;
+    }
+    else {
+        const int blk_m = 32;
+        const int blk_n = 32;
+        const int blk_k = 16;
+        dim3      dimBlock(HEP_WARP_SIZE);
+        dim3      dimGrid((m - 1) / blk_m + 1, (n - 1) / blk_n + 1, batch_count);
+        gemm_batched_general_kernel_fp16fp32_Akxm_Bnxk_Cnxm_template<blk_m, blk_n, blk_k><<<dimGrid, dimBlock, 0, stream>>>(m, n, k, dA, lda, dB, ldb, dC, ldc);
+        return ;
+    }
+    #endif  
 }
