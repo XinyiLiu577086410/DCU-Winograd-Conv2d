@@ -194,15 +194,16 @@ winograd_2x3_kernel(_Float16* filter_d,
 
     __syncthreads();
 
+    
+#ifdef HYGON_DCU_MATRIX_CORE
     asm volatile("s_waitcnt lgkmcnt(0)\n\t");
-
-    //! do batched gemm
-    const int elem_idx = tid / 64;
+    const int elem_idx = tid / HEP_WARP_SIZE;
     const int h = elem_idx / TILE_IN_W;
     const int w = elem_idx % TILE_IN_W;
+    //! do batched gemm
     fp16x4 frag_A[2], frag_B[2];
-    const size_t read_dim_k  = (tid % 64) / TCU_SIZE * 4;
-    const size_t read_dim_mn = (tid % 64) % TCU_SIZE;
+    const size_t read_dim_k  = (tid % HEP_WARP_SIZE) / TCU_SIZE * 4;
+    const size_t read_dim_mn = (tid % HEP_WARP_SIZE) % TCU_SIZE;
     frag_A[0] = { lds.V[h][w][read_dim_k + 0][read_dim_mn +  0], 
                   lds.V[h][w][read_dim_k + 1][read_dim_mn +  0], 
                   lds.V[h][w][read_dim_k + 2][read_dim_mn +  0], 
@@ -237,17 +238,57 @@ winograd_2x3_kernel(_Float16* filter_d,
     NOP_48_CYCLES();
     asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[1][1]), "+v"(frag_A[1]), "+v"(frag_B[1]));
     NOP_48_CYCLES();
+#else 
+    const int elem_idx = tid / HEP_WARP_SIZE;
+    const int h = elem_idx / TILE_IN_W;
+    const int w = elem_idx % TILE_IN_W;
+    size_t write_dim_m = (tid % HEP_WARP_SIZE) % BLK_K;
+    size_t write_dim_n = (tid % HEP_WARP_SIZE) / BLK_K;
+
+    #pragma unroll(BLK_K)
+    for (int k = 0; k < BLK_K; k++) {
+      float v = lds.V[h][w][k][write_dim_m +  0];
+      #pragma unroll(4)
+      for (int t = 0; t < 4; ++t) {
+        C_reg_acc[0][0][t] += v * (float)lds.Ut[h][w][write_dim_n +  0 + t * 4][k];
+      }
+    }
+    #pragma unroll(BLK_K)
+    for (int k = 0; k < BLK_K; k++) {
+      float v = lds.V[h][w][k][write_dim_m +  0];
+      #pragma unroll(4)
+      for (int t = 0; t < 4; ++t) {
+        C_reg_acc[0][1][t] += v * (float)lds.Ut[h][w][write_dim_n + 16 + t * 4][k];
+      }
+    }
+    #pragma unroll(BLK_K)
+    for (int k = 0; k < BLK_K; k++) {
+      float v = lds.V[h][w][k][write_dim_m + 16];
+      #pragma unroll(4)
+      for (int t = 0; t < 4; ++t) {
+        C_reg_acc[1][0][t] += v * (float)lds.Ut[h][w][write_dim_n +  0 + t * 4][k];
+      }
+    }
+    #pragma unroll(BLK_K)
+    for (int k = 0; k < BLK_K; k++) {
+      float v = lds.V[h][w][k][write_dim_m + 16];
+      #pragma unroll(4)
+      for (int t = 0; t < 4; ++t) {
+        C_reg_acc[1][1][t] += v * (float)lds.Ut[h][w][write_dim_n + 16 + t * 4][k];
+      }
+    }
+#endif
   } //! end for ic_blk = 0 to K by BLK_K
 
 
   __syncthreads();
 
   //! Store the result matrices of batched gemm into lds.
-  const int elem_idx = tid / 64;
+  const int elem_idx = tid / HEP_WARP_SIZE;
   const int h = elem_idx / TILE_IN_W;
   const int w = elem_idx % TILE_IN_W;
-  const size_t write_local_tile = (tid % 64) % TCU_SIZE;
-  const size_t write_local_oc   = (tid % 64) / TCU_SIZE;
+  const size_t write_local_tile = (tid % HEP_WARP_SIZE) % TCU_SIZE;
+  const size_t write_local_oc   = (tid % HEP_WARP_SIZE) / TCU_SIZE;
   lds.Y[h][w][write_local_oc +  0 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0][0].x;
   lds.Y[h][w][write_local_oc +  4 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0][0].y;
   lds.Y[h][w][write_local_oc +  8 +  0][write_local_tile +  0] = (_Float16)C_reg_acc[0][0].z;

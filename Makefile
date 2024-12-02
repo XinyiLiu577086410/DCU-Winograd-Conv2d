@@ -2,6 +2,7 @@ CC=$(HIP_PATH)/bin/hipcc
 
 
 CXXFLAGS += -DHIP_ROCM -DNDEBUG -DUSE_DEFAULT_STDLIB --offload-arch=gfx928 -g 
+# CXXFLAGS += -DHYGON_DCU_MATRIX_CORE
 INCLUDES += -I$(HIP_PATH)/include -I./include
 
 #获取当前目录下的cpp文件集，放在变量CUR_SOURCE中
