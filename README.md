@@ -1,7 +1,6 @@
 # 项目结构
 ```bash
 .
-├── conf.txt
 │   # 比赛算例的测试脚本
 ├── final.sh
 ├── pre.sh
@@ -20,7 +19,7 @@
 │   # 源码文件
 └── src
     ├── conv2d.cpp                  # 卷积计算入口，负责算子选择
-    ├── main.cpp                    # 主函数
+    ├── main.cpp                    # 测试程序入口
     ├── winograd_2x3_fused.cpp      # 融合式Winograd卷积算子实现
     ├── winograd_2x3_non_fused.cpp  # 非融合式Winograd卷积算子实现
     └── winograd_4x3_non_fused.cpp  # 非融合式Winograd卷积算子实现
