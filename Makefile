@@ -14,12 +14,14 @@ CUR_OBJS=${patsubst %.cpp, %.o, $(CUR_SOURCE)}
 EXECUTABLE=conv2dfp16demo
 
 
-all:$(EXECUTABLE)
+all:$(EXECUTABLE) MIOPEN
+
+MIOPEN:
+	$(CC) ./miopen.cpp $(CXXFLAGS) -o ./miopen.exe
 
 $(EXECUTABLE): $(CUR_OBJS)
 	$(CC) $(CUR_OBJS) $(LDFLAGS) -o $(EXECUTABLE)
 
-	
 %.o:%.cpp
 	$(CC) -c -w $< $(CXXFLAGS) $(INCLUDES) -o $@
 	
