@@ -1,4 +1,4 @@
-#include <miopen/miopen.hpp>
+#include <miopen/miopen.h>
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 #include <iostream>
@@ -153,10 +153,10 @@ int main(int argc, char* argv[]) {
 
     // 计算性能
     double elapsed = std::chrono::duration_cast<std::chrono::duration<double>>(end - start).count();
-    double avg_time = elapsed / runs * 1000; // ms
-    double gflops = (2.0 * n * k * out_h * out_w * c * r * s) / (avg_time * 1e6); // TFLOPs
+    double avg_time = elapsed / runs * 1000 * 1000; //us
+    double gflops = (2.0 * n * k * out_h * out_w * c * r * s) / (avg_time * 1e3); // TFLOPs
 
-    std::cout << "Average time: " << avg_time << " ms" << std::endl;
+    std::cout << "Average time: " << avg_time << " us" << std::endl;
     std::cout << "Throughput: " << gflops << " TFLOPs" << std::endl;
 
     // 清理资源

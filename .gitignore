@@ -1,1 +1,4 @@
 .vscode/
+*.exe
+*.o
+conv2dfp16demo

@@ -2,7 +2,8 @@ CC=$(HIP_PATH)/bin/hipcc
 
 
 CXXFLAGS += -DHIP_ROCM -DNDEBUG -DUSE_DEFAULT_STDLIB --offload-arch=gfx928 -g 
-# CXXFLAGS += -DHYGON_DCU_MATRIX_CORE
+CXXFLAGS += -DHYGON_DCU_MATRIX_CORE
+CXXFLAGS += -DDISABLE_VERIFY
 INCLUDES += -I$(HIP_PATH)/include -I./include
 
 #获取当前目录下的cpp文件集，放在变量CUR_SOURCE中
@@ -17,7 +18,7 @@ EXECUTABLE=conv2dfp16demo
 all:$(EXECUTABLE) MIOPEN
 
 MIOPEN:
-	$(CC) ./miopen.cpp $(CXXFLAGS) -o ./miopen.exe
+	$(CC) ./miopen.cpp -lMIOpen $(CXXFLAGS) -o ./miopen.exe
 
 $(EXECUTABLE): $(CUR_OBJS)
 	$(CC) $(CUR_OBJS) $(LDFLAGS) -o $(EXECUTABLE)
@@ -29,3 +30,4 @@ $(EXECUTABLE): $(CUR_OBJS)
 clean:
 	rm -f $(EXECUTABLE)
 	rm -f ./src/*.o
+	rm -f ./miopen.exe
