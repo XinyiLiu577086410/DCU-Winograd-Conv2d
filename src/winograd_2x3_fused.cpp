@@ -222,14 +222,17 @@ winograd_2x3_kernel(_Float16* filter_d,
                   lds.Ut[h][w][read_dim_mn + 16][read_dim_k + 2], 
                   lds.Ut[h][w][read_dim_mn + 16][read_dim_k + 3] };
     asm volatile("s_waitcnt lgkmcnt(0)\n\t");
-
-    #define NOP_48_CYCLES() asm volatile("s_nop 8\n\t"); \
+    #ifndef IGNORE_NOP
+    	#define NOP_48_CYCLES() \
+			    asm volatile("s_nop 8\n\t"); \
                             asm volatile("s_nop 8\n\t"); \
                             asm volatile("s_nop 8\n\t"); \
                             asm volatile("s_nop 8\n\t"); \
                             asm volatile("s_nop 8\n\t"); \
                             asm volatile("s_nop 8\n\t");
-
+    #else
+    	#define NOP_48_CYCLES() 
+    #endif
     asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[0][0]), "+v"(frag_A[0]), "+v"(frag_B[0]));
     NOP_48_CYCLES();
     asm volatile("v_mmac_f32_16x16x16_f16 %0, %1, %2, %0\n\t":"+v"(C_reg_acc[0][1]), "+v"(frag_A[0]), "+v"(frag_B[1]));
